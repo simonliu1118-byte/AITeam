@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace AITeam.Models;
@@ -16,6 +17,9 @@ public sealed class ProjectEntry
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
+    [JsonPropertyName("project_path")]
+    public string ProjectPath { get; set; } = "";
+
     [JsonPropertyName("repo_name")]
     public string RepoName { get; set; } = "";
 
@@ -31,13 +35,25 @@ public sealed class ProjectEntry
     [JsonPropertyName("default_branch")]
     public string DefaultBranch { get; set; } = "main";
 
+    [JsonPropertyName("version_file")]
+    public string VersionFile { get; set; } = "";
+
+    [JsonPropertyName("tag_prefix")]
+    public string TagPrefix { get; set; } = "";
+
     [JsonPropertyName("active")]
     public bool? Active { get; set; } = true;
 
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    [JsonIgnore]
     public string PhysicalPath =>
-        string.IsNullOrWhiteSpace(RepoSubpath)
-            ? RepoPath
-            : Path.Combine(RepoPath, RepoSubpath.Replace('/', Path.DirectorySeparatorChar));
+        !string.IsNullOrWhiteSpace(ProjectPath)
+            ? ProjectPath
+            : string.IsNullOrWhiteSpace(RepoSubpath)
+                ? RepoPath
+                : Path.Combine(RepoPath, RepoSubpath.Replace('/', Path.DirectorySeparatorChar));
 
     public override string ToString() => Name;
 }
