@@ -39,7 +39,6 @@ jobs:
           -c Release
           -r win-x64
           --self-contained true
-          --no-restore
           -p:PublishSingleFile=false
           -p:PublishTrimmed=false
           -p:PublishReadyToRun=true
