@@ -1,0 +1,80 @@
+name: Build AITeam Windows Portable
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\src\AITeam.App\AITeam.App.csproj
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build .\src\AITeam.App\AITeam.App.csproj -c Release --no-restore
+
+      - name: Publish portable folder
+        shell: pwsh
+        run: >
+          dotnet publish .\src\AITeam.App\AITeam.App.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          --no-restore
+          -p:PublishSingleFile=false
+          -p:PublishTrimmed=false
+          -p:PublishReadyToRun=true
+          -o .\artifacts\publish
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath .\VERSION -Raw).Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $zip = ".\artifacts\AITeam-$version-win-x64.zip"
+          if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+          Compress-Archive -Path .\artifacts\publish\* -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AITeam-${{ steps.version.outputs.version }}-win-x64
+          path: artifacts/AITeam-${{ steps.version.outputs.version }}-win-x64.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release for tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $zip = "artifacts/AITeam-$version-win-x64.zip"
+          gh release create "${{ github.ref_name }}" $zip `
+            --title "AITeam ${{ github.ref_name }}" `
+            --generate-notes
