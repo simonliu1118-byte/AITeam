@@ -5,11 +5,13 @@ namespace AITeam;
 public sealed class RoundedCard : Panel
 {
     private int _radius = 10;
-    private Color _borderColor = Color.LightGray;
+    private Color _borderColor = Color.FromArgb(205, 212, 220);
 
     public RoundedCard()
     {
         DoubleBuffered = true;
+        ResizeRedraw = true;
+        BackColor = Color.White;
     }
 
     public int Radius
@@ -18,7 +20,6 @@ public sealed class RoundedCard : Panel
         set
         {
             _radius = Math.Max(0, value);
-            UpdateRegion();
             Invalidate();
         }
     }
@@ -38,67 +39,27 @@ public sealed class RoundedCard : Panel
         base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-        using var path = CreateRoundedRectangle(ClientRectangle, Radius);
-        using var pen = new Pen(BorderColor);
+        var rect = new RectangleF(1.25f, 1.25f, Math.Max(1, ClientSize.Width - 2.5f), Math.Max(1, ClientSize.Height - 2.5f));
+        using var path = CreateRoundedRectangle(rect, Radius);
+        using var pen = new Pen(BorderColor, 1.35f);
         e.Graphics.DrawPath(pen, path);
     }
 
-    protected override void OnResize(EventArgs eventargs)
+    private static GraphicsPath CreateRoundedRectangle(RectangleF rect, int radius)
     {
-        base.OnResize(eventargs);
-        UpdateRegion();
-    }
-
-    private void UpdateRegion()
-    {
-        if (Width <= 0 || Height <= 0)
-        {
-            return;
-        }
-
-        using var path = CreateRoundedRectangle(ClientRectangle, Radius);
-        Region?.Dispose();
-        Region = new Region(path);
-    }
-
-    private static GraphicsPath CreateRoundedRectangle(Rectangle bounds, int radius)
-    {
-        var rect = new Rectangle(
-            bounds.X,
-            bounds.Y,
-            Math.Max(1, bounds.Width - 1),
-            Math.Max(1, bounds.Height - 1));
-
         var path = new GraphicsPath();
-
-        if (radius <= 0)
+        if (radius <= 0 || rect.Width <= radius * 2 || rect.Height <= radius * 2)
         {
             path.AddRectangle(rect);
             path.CloseFigure();
             return path;
         }
 
-        var diameter = Math.Max(2, radius * 2);
-
-        if (rect.Width <= diameter || rect.Height <= diameter)
-        {
-            path.AddRectangle(rect);
-            path.CloseFigure();
-            return path;
-        }
-
-        var arc = new Rectangle(rect.X, rect.Y, diameter, diameter);
-        path.AddArc(arc, 180, 90);
-
-        arc.X = rect.Right - diameter;
-        path.AddArc(arc, 270, 90);
-
-        arc.Y = rect.Bottom - diameter;
-        path.AddArc(arc, 0, 90);
-
-        arc.X = rect.Left;
-        path.AddArc(arc, 90, 90);
-
+        var d = radius * 2f;
+        path.AddArc(rect.Left, rect.Top, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Top, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - d, d, d, 90, 90);
         path.CloseFigure();
         return path;
     }
