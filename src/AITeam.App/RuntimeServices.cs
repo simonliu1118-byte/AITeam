@@ -111,10 +111,14 @@ public sealed class ProjectRegistryService
                 ReadCommentHandling = JsonCommentHandling.Skip
             });
 
-        return document?.Projects
+        if (document is null)
+        {
+            return Array.Empty<ProjectEntry>();
+        }
+
+        return document.Projects
             .Where(p => p.Active is not false)
             .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList()
-            ?? Array.Empty<ProjectEntry>();
+            .ToList();
     }
 }
