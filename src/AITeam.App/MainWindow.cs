@@ -1,0 +1,664 @@
+using AITeam.Models;
+using AITeam.Services;
+
+namespace AITeam;
+
+public sealed class MainWindow : Form
+{
+    private static readonly Color AppBackground = Color.FromArgb(245, 247, 250);
+    private static readonly Color CardBackground = Color.White;
+    private static readonly Color BorderColor = Color.FromArgb(221, 226, 232);
+    private static readonly Color PrimaryText = Color.FromArgb(34, 40, 49);
+    private static readonly Color SecondaryText = Color.FromArgb(104, 113, 123);
+    private static readonly Color Accent = Color.FromArgb(43, 108, 176);
+
+    private readonly string _runtimeRoot;
+    private readonly ProjectRegistryService _projectRegistry;
+    private readonly ProviderHealthService _providerHealth;
+    private readonly CancellationTokenSource _lifetimeCts = new();
+
+    private readonly ComboBox _projectBox = new();
+    private readonly Label _projectInfo = new();
+    private readonly TextBox _requestBox = new();
+    private readonly TextBox _currentTaskBox = new();
+    private readonly RichTextBox _outputBox = new();
+    private readonly Button _recheckButton = new();
+    private readonly Button _sendButton = new();
+    private readonly Label _modeBadge = new();
+    private readonly Label _currentTaskState = new();
+    private readonly Dictionary<ProviderId, ProviderStatusCard> _providerCards = new();
+
+    private IReadOnlyList<ProjectEntry> _projects = Array.Empty<ProjectEntry>();
+    private bool _taskRunning;
+
+    public MainWindow(string runtimeRoot)
+    {
+        _runtimeRoot = runtimeRoot;
+        _projectRegistry = new ProjectRegistryService(runtimeRoot);
+        _providerHealth = new ProviderHealthService(runtimeRoot, new ProcessRunner());
+
+        Text = "AITeam";
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimumSize = new Size(1080, 690);
+        Size = new Size(1240, 760);
+        Font = new Font("Microsoft JhengHei UI", 10F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        BackColor = AppBackground;
+
+        BuildUi();
+        LoadProjects();
+
+        Shown += async (_, _) => await RecheckProvidersAsync();
+        FormClosing += OnFormClosing;
+    }
+
+    private void BuildUi()
+    {
+        var shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = AppBackground,
+            Padding = Padding.Empty
+        };
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        Controls.Add(shell);
+
+        shell.Controls.Add(BuildHeader(), 0, 0);
+
+        var body = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = AppBackground,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56F));
+        shell.Controls.Add(body, 0, 1);
+
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = AppBackground };
+        var right = new Panel { Dock = DockStyle.Fill, BackColor = AppBackground };
+        body.Controls.Add(left, 0, 0);
+        body.Controls.Add(right, 1, 0);
+
+        BuildLeftPanel(left);
+        BuildRightPanel(right);
+    }
+
+    private Control BuildHeader()
+    {
+        var header = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = CardBackground,
+            Padding = new Padding(22, 14, 22, 12)
+        };
+
+        header.Paint += (_, e) =>
+        {
+            using var pen = new Pen(BorderColor);
+            e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1);
+        };
+
+        var title = new Label
+        {
+            Text = "AITeam",
+            AutoSize = true,
+            Font = new Font("Microsoft JhengHei UI", 17F, FontStyle.Bold),
+            ForeColor = PrimaryText,
+            Location = new Point(22, 15)
+        };
+
+        var version = new Label
+        {
+            Text = $"v{Application.ProductVersion}",
+            AutoSize = true,
+            Font = new Font("Microsoft JhengHei UI", 9F),
+            ForeColor = SecondaryText,
+            Location = new Point(24, 45)
+        };
+
+        _modeBadge.Text = "待命";
+        _modeBadge.AutoSize = false;
+        _modeBadge.TextAlign = ContentAlignment.MiddleCenter;
+        _modeBadge.Size = new Size(74, 30);
+        _modeBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _modeBadge.BackColor = Color.FromArgb(236, 248, 240);
+        _modeBadge.ForeColor = Color.FromArgb(36, 122, 72);
+        _modeBadge.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
+
+        header.Controls.Add(title);
+        header.Controls.Add(version);
+        header.Controls.Add(_modeBadge);
+
+        header.Resize += (_, _) =>
+        {
+            _modeBadge.Location = new Point(
+                Math.Max(0, header.ClientSize.Width - _modeBadge.Width - 22),
+                21);
+        };
+
+        return header;
+    }
+
+    private void BuildLeftPanel(Control parent)
+    {
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(16, 16, 8, 16),
+            ColumnCount = 1,
+            RowCount = 5,
+            BackColor = AppBackground
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        parent.Controls.Add(layout);
+
+        layout.Controls.Add(BuildProjectCard(), 0, 0);
+        layout.Controls.Add(BuildProviderArea(), 0, 1);
+
+        layout.Controls.Add(new Label
+        {
+            Text = "任務 / 查詢",
+            AutoSize = true,
+            ForeColor = PrimaryText,
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold),
+            Margin = new Padding(2, 16, 0, 7)
+        }, 0, 2);
+
+        var requestCard = new RoundedCard
+        {
+            Dock = DockStyle.Fill,
+            BackColor = CardBackground,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(12),
+            Margin = Padding.Empty
+        };
+
+        _requestBox.Multiline = true;
+        _requestBox.ScrollBars = ScrollBars.Vertical;
+        _requestBox.BorderStyle = BorderStyle.None;
+        _requestBox.Dock = DockStyle.Fill;
+        _requestBox.BackColor = CardBackground;
+        _requestBox.ForeColor = PrimaryText;
+        _requestBox.Font = new Font("Microsoft JhengHei UI", 11F);
+        _requestBox.PlaceholderText = "輸入任務或查詢內容…";
+        _requestBox.TextChanged += (_, _) => RefreshSendButton();
+
+        requestCard.Controls.Add(_requestBox);
+        layout.Controls.Add(requestCard, 0, 3);
+
+        var bottom = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 2,
+            Margin = new Padding(0, 12, 0, 0)
+        };
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        bottom.Controls.Add(new Label
+        {
+            Text = "任務執行中仍可先輸入下一件；完成前「送出」會保持鎖定。",
+            AutoSize = true,
+            ForeColor = SecondaryText,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(2, 10, 10, 0)
+        }, 0, 0);
+
+        _sendButton.Text = "送出";
+        _sendButton.AutoSize = false;
+        _sendButton.Size = new Size(116, 42);
+        _sendButton.FlatStyle = FlatStyle.Flat;
+        _sendButton.FlatAppearance.BorderSize = 0;
+        _sendButton.BackColor = Accent;
+        _sendButton.ForeColor = Color.White;
+        _sendButton.Font = new Font("Microsoft JhengHei UI", 10.5F, FontStyle.Bold);
+        _sendButton.Cursor = Cursors.Hand;
+        _sendButton.Click += async (_, _) => await HandleSendAsync();
+        bottom.Controls.Add(_sendButton, 1, 0);
+
+        layout.Controls.Add(bottom, 0, 4);
+        RefreshSendButton();
+    }
+
+    private Control BuildProjectCard()
+    {
+        var card = new RoundedCard
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            BackColor = CardBackground,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(14),
+            Margin = Padding.Empty
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 3,
+            BackColor = Color.Transparent
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var label = new Label
+        {
+            Text = "專案",
+            AutoSize = true,
+            ForeColor = PrimaryText,
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        layout.SetColumnSpan(label, 2);
+        layout.Controls.Add(label, 0, 0);
+
+        _projectBox.Dock = DockStyle.Fill;
+        _projectBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _projectBox.Margin = new Padding(0, 0, 10, 0);
+        _projectBox.SelectedIndexChanged += (_, _) => UpdateProjectInfo();
+
+        var projectButton = new Button
+        {
+            Text = "管理專案",
+            AutoSize = false,
+            Size = new Size(104, 34),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.White,
+            ForeColor = PrimaryText,
+            Enabled = false,
+            Margin = Padding.Empty
+        };
+        projectButton.FlatAppearance.BorderColor = BorderColor;
+
+        var tip = new ToolTip();
+        tip.SetToolTip(projectButton, "EXE 版 Project Manager 下一階段接入；目前沿用既有專案設定。");
+
+        layout.Controls.Add(_projectBox, 0, 1);
+        layout.Controls.Add(projectButton, 1, 1);
+
+        _projectInfo.AutoSize = true;
+        _projectInfo.ForeColor = SecondaryText;
+        _projectInfo.Margin = new Padding(0, 7, 0, 0);
+        layout.SetColumnSpan(_projectInfo, 2);
+        layout.Controls.Add(_projectInfo, 0, 2);
+
+        card.Controls.Add(layout);
+        return card;
+    }
+
+    private Control BuildProviderArea()
+    {
+        var wrapper = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 4,
+            Margin = new Padding(0, 16, 0, 0),
+            BackColor = AppBackground
+        };
+
+        var titleRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 2,
+            Margin = Padding.Empty,
+            BackColor = AppBackground
+        };
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        titleRow.Controls.Add(new Label
+        {
+            Text = "AI 狀態",
+            AutoSize = true,
+            ForeColor = PrimaryText,
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold),
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(2, 7, 0, 0)
+        }, 0, 0);
+
+        _recheckButton.Text = "重新檢查";
+        _recheckButton.AutoSize = false;
+        _recheckButton.Size = new Size(94, 32);
+        _recheckButton.FlatStyle = FlatStyle.Flat;
+        _recheckButton.BackColor = Color.White;
+        _recheckButton.ForeColor = PrimaryText;
+        _recheckButton.FlatAppearance.BorderColor = BorderColor;
+        _recheckButton.Click += async (_, _) => await RecheckProvidersAsync();
+        titleRow.Controls.Add(_recheckButton, 1, 0);
+
+        wrapper.Controls.Add(titleRow, 0, 0);
+        AddProviderCard(wrapper, 1, ProviderId.Codex, "GPT / Codex");
+        AddProviderCard(wrapper, 2, ProviderId.Claude, "Claude");
+        AddProviderCard(wrapper, 3, ProviderId.Antigravity, "Gemini / Antigravity");
+
+        return wrapper;
+    }
+
+    private void AddProviderCard(TableLayoutPanel host, int row, ProviderId provider, string name)
+    {
+        var card = new ProviderStatusCard(provider, name)
+        {
+            Dock = DockStyle.Top,
+            Height = 72,
+            Margin = new Padding(0, row == 1 ? 8 : 7, 0, 0)
+        };
+
+        card.SessionEnabledChanged += (_, enabled) =>
+        {
+            if (!enabled)
+            {
+                card.SetManualDisabled();
+            }
+            else
+            {
+                card.SetHealth(new ProviderHealth(provider, ProviderHealthState.Unknown, "待重新檢查", TimeSpan.Zero));
+            }
+        };
+
+        _providerCards[provider] = card;
+        host.Controls.Add(card, 0, row);
+    }
+
+    private void BuildRightPanel(Control parent)
+    {
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(8, 16, 16, 16),
+            RowCount = 4,
+            ColumnCount = 1,
+            BackColor = AppBackground
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        parent.Controls.Add(layout);
+
+        layout.Controls.Add(new Label
+        {
+            Text = "目前任務",
+            AutoSize = true,
+            ForeColor = PrimaryText,
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold),
+            Margin = new Padding(2, 0, 0, 7)
+        }, 0, 0);
+
+        var currentCard = new RoundedCard
+        {
+            Dock = DockStyle.Top,
+            MinimumSize = new Size(0, 92),
+            BackColor = CardBackground,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(14),
+            Margin = Padding.Empty
+        };
+
+        var currentLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = Color.Transparent
+        };
+        currentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        currentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        _currentTaskState.Text = "待命";
+        _currentTaskState.AutoSize = true;
+        _currentTaskState.ForeColor = SecondaryText;
+        _currentTaskState.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
+        _currentTaskState.Margin = new Padding(0, 0, 0, 5);
+
+        _currentTaskBox.Multiline = true;
+        _currentTaskBox.ReadOnly = true;
+        _currentTaskBox.BorderStyle = BorderStyle.None;
+        _currentTaskBox.BackColor = CardBackground;
+        _currentTaskBox.ForeColor = PrimaryText;
+        _currentTaskBox.Text = "尚未送出任務。";
+        _currentTaskBox.Dock = DockStyle.Fill;
+
+        currentLayout.Controls.Add(_currentTaskState, 0, 0);
+        currentLayout.Controls.Add(_currentTaskBox, 0, 1);
+        currentCard.Controls.Add(currentLayout);
+        layout.Controls.Add(currentCard, 0, 1);
+
+        layout.Controls.Add(new Label
+        {
+            Text = "執行進度 / 結果",
+            AutoSize = true,
+            ForeColor = PrimaryText,
+            Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold),
+            Margin = new Padding(2, 16, 0, 7)
+        }, 0, 2);
+
+        var logCard = new RoundedCard
+        {
+            Dock = DockStyle.Fill,
+            BackColor = CardBackground,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(10),
+            Margin = Padding.Empty
+        };
+
+        _outputBox.Dock = DockStyle.Fill;
+        _outputBox.ReadOnly = true;
+        _outputBox.BorderStyle = BorderStyle.None;
+        _outputBox.BackColor = CardBackground;
+        _outputBox.ForeColor = Color.FromArgb(55, 62, 70);
+        _outputBox.Font = new Font("Consolas", 9.5F);
+        logCard.Controls.Add(_outputBox);
+        layout.Controls.Add(logCard, 0, 3);
+    }
+
+    private void LoadProjects()
+    {
+        try
+        {
+            _projects = _projectRegistry.Load();
+            _projectBox.Items.Clear();
+
+            foreach (var project in _projects)
+            {
+                _projectBox.Items.Add(project);
+            }
+
+            if (_projectBox.Items.Count > 0)
+            {
+                _projectBox.SelectedIndex = 0;
+            }
+            else
+            {
+                _projectInfo.Text = "找不到既有專案設定。";
+            }
+
+            AppendLog($"Runtime root: {_runtimeRoot}");
+            AppendLog($"Project registry: {_projectRegistry.RegistryPath ?? "(not found)"}");
+            AppendLog($"Projects loaded: {_projects.Count}");
+            AppendLog("EXE 測試版已啟動；目前不會修改任何 project source。");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[ERROR] 載入專案失敗：{ex.Message}");
+        }
+    }
+
+    private void UpdateProjectInfo()
+    {
+        if (_projectBox.SelectedItem is not ProjectEntry project)
+        {
+            _projectInfo.Text = string.Empty;
+            return;
+        }
+
+        _projectInfo.Text = $"{project.GitHubRepo}  ·  {(string.IsNullOrWhiteSpace(project.RepoSubpath) ? "Repo 根目錄" : project.RepoSubpath)}";
+    }
+
+    private async Task RecheckProvidersAsync()
+    {
+        _recheckButton.Enabled = false;
+        AppendLog("開始檢查三個 AI...");
+
+        foreach (var provider in Enum.GetValues<ProviderId>())
+        {
+            if (_providerCards[provider].SessionEnabled)
+            {
+                _providerCards[provider].SetHealth(ProviderHealth.Checking(provider));
+            }
+        }
+
+        var tasks = Enum.GetValues<ProviderId>()
+            .Where(p => _providerCards[p].SessionEnabled)
+            .ToDictionary(p => p, p => _providerHealth.ProbeAsync(p, _lifetimeCts.Token));
+
+        foreach (var item in tasks)
+        {
+            var health = await item.Value;
+            _providerCards[item.Key].SetHealth(health);
+            AppendLog($"{FriendlyProvider(item.Key)}：{FriendlyState(health)} ({health.Duration.TotalSeconds:0.0}s)");
+
+            if (health.State is ProviderHealthState.Error or ProviderHealthState.TemporaryError or ProviderHealthState.AuthenticationRequired or ProviderHealthState.Quota)
+            {
+                if (!string.IsNullOrWhiteSpace(health.Message) && health.Message != FriendlyState(health))
+                {
+                    AppendLog($"  {health.Message}");
+                }
+            }
+        }
+
+        _recheckButton.Enabled = true;
+        AppendLog("AI 檢查完成。");
+    }
+
+    private async Task HandleSendAsync()
+    {
+        if (_taskRunning || string.IsNullOrWhiteSpace(_requestBox.Text))
+        {
+            return;
+        }
+
+        var snapshot = _requestBox.Text.Trim();
+        _currentTaskBox.Text = snapshot;
+        _currentTaskState.Text = "UI 驗證";
+        _requestBox.Clear();
+
+        SetTaskRunning(true);
+        AppendLog("已接收「送出」操作。");
+        AppendLog("目前仍為 UI 測試版，尚未接入真正任務引擎。");
+
+        try
+        {
+            await Task.Delay(650, _lifetimeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetTaskRunning(false);
+            }
+        }
+
+        _currentTaskState.Text = "待命";
+        AppendLog("UI 送出流程驗證完成。");
+    }
+
+    private void SetTaskRunning(bool running)
+    {
+        _taskRunning = running;
+        _modeBadge.Text = running ? "執行中" : "待命";
+        _modeBadge.BackColor = running ? Color.FromArgb(255, 247, 225) : Color.FromArgb(236, 248, 240);
+        _modeBadge.ForeColor = running ? Color.FromArgb(158, 104, 0) : Color.FromArgb(36, 122, 72);
+        _sendButton.Text = running ? "執行中…" : "送出";
+        RefreshSendButton();
+    }
+
+    private void RefreshSendButton()
+    {
+        var canSend = !_taskRunning && !string.IsNullOrWhiteSpace(_requestBox.Text);
+        _sendButton.Enabled = canSend;
+        _sendButton.BackColor = canSend ? Accent : Color.FromArgb(181, 190, 200);
+        _sendButton.Cursor = canSend ? Cursors.Hand : Cursors.Default;
+    }
+
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (_taskRunning && e.CloseReason == CloseReason.UserClosing)
+        {
+            var answer = MessageBox.Show(
+                "目前任務仍在執行。確定要關閉 AITeam 並中止目前任務嗎？",
+                "AITeam",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+
+            if (answer != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+
+        _lifetimeCts.Cancel();
+    }
+
+    private static string FriendlyProvider(ProviderId provider) =>
+        provider switch
+        {
+            ProviderId.Codex => "GPT / Codex",
+            ProviderId.Claude => "Claude",
+            ProviderId.Antigravity => "Gemini / Antigravity",
+            _ => provider.ToString()
+        };
+
+    private static string FriendlyState(ProviderHealth health) =>
+        health.State switch
+        {
+            ProviderHealthState.Unknown => "待檢查",
+            ProviderHealthState.Checking => "檢測中",
+            ProviderHealthState.Online => "上線",
+            ProviderHealthState.Quota => "超過限額",
+            ProviderHealthState.AuthenticationRequired => "需要重新登入",
+            ProviderHealthState.TemporaryError => "暫時異常",
+            ProviderHealthState.Error => "錯誤",
+            ProviderHealthState.Missing => "CLI 未安裝",
+            _ => health.State.ToString()
+        };
+
+    private void AppendLog(string text)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action<string>(AppendLog), text);
+            return;
+        }
+
+        _outputBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}\r\n");
+        _outputBox.SelectionStart = _outputBox.TextLength;
+        _outputBox.ScrollToCaret();
+    }
+}

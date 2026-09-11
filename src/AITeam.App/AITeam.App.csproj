@@ -8,10 +8,20 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AITeam</AssemblyName>
     <RootNamespace>AITeam</RootNamespace>
-    <Version>0.2.0-alpha.2</Version>
-    <FileVersion>0.2.0.2</FileVersion>
+    <Version>0.2.1</Version>
+    <FileVersion>0.2.1.0</FileVersion>
     <AssemblyVersion>0.2.0.0</AssemblyVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <SatelliteResourceLanguages>zh-Hant</SatelliteResourceLanguages>
   </PropertyGroup>
 
 </Project>

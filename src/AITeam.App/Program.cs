@@ -34,7 +34,7 @@ internal static class Program
 
         try
         {
-            Application.Run(new MainForm(runtimeRoot));
+            Application.Run(new MainWindow(runtimeRoot));
         }
         catch (Exception ex)
         {
