@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "paths": {
+    "worktrees_root": "D:\\AITeam\\worktrees",
+    "tasks_root": "D:\\AITeam\\tasks",
+    "logs_root": "D:\\AITeam\\logs",
+    "profiles_root": "D:\\AITeam\\profiles"
+  },
+  "workflow": {
+    "max_repair_rounds": 3,
+    "auto_sync_main_before_task": true,
+    "auto_push_completed_versions": true,
+    "keep_successful_task_artifacts": false
+  }
+}
