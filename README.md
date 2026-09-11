@@ -26,3 +26,11 @@ The Git repository is intentionally separated from machine-specific runtime data
 - `D:\AITeam\config` — current machine runtime configuration
 
 Runtime data, credentials, provider states, and managed repositories are not committed here.
+
+## Portable Windows EXE development
+
+The portable EXE rewrite starts at `v0.2.0-alpha.1`.
+
+The first alpha intentionally runs side-by-side with the existing PowerShell prototype. It validates the native executable shell, project-registry compatibility, provider health checks, hidden subprocess execution, and GitHub Actions self-contained Windows publishing before any source-writing task pipeline is moved into the EXE.
+
+See `docs/EXE_MIGRATION_PLAN.md`.
