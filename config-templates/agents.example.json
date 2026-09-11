@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "agents": {
+    "codex": { "command": "codex", "enabled": true },
+    "claude": { "command": "claude", "enabled": true },
+    "antigravity": { "command": "agy", "enabled": true }
+  }
+}
