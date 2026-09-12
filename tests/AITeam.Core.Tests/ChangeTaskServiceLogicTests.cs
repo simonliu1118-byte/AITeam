@@ -46,6 +46,32 @@ public sealed class ChangeTaskServiceLogicTests
     {
         Assert.Equal(expected, ChangeTaskService.ReviewPassed(review));
     }
+
+    [Fact]
+    public void ParseRepairDispute_ExtractsReasonWhenRepairerDisputes()
+    {
+        var repairResult = "AITeamRepairStance: DISPUTE\r\n這個發現其實是誤判，因為輸入已經在上一層驗證過。";
+
+        var reason = ChangeTaskService.ParseRepairDispute(repairResult);
+
+        Assert.Equal("這個發現其實是誤判，因為輸入已經在上一層驗證過。", reason);
+    }
+
+    [Fact]
+    public void ParseRepairDispute_FallsBackToPlaceholder_WhenReasonIsEmpty()
+    {
+        var reason = ChangeTaskService.ParseRepairDispute("AITeamRepairStance: DISPUTE");
+
+        Assert.Equal("（未提供理由）", reason);
+    }
+
+    [Fact]
+    public void ParseRepairDispute_ReturnsNull_WhenRepairerMadeNoDispute()
+    {
+        var reason = ChangeTaskService.ParseRepairDispute("已修正相關問題並補上測試。");
+
+        Assert.Null(reason);
+    }
 }
 
 public sealed class ChangeTaskServiceRoleSelectionTests

@@ -179,11 +179,33 @@ public sealed class ChangeTaskService
                     ? implementer
                     : Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
                 progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
-                await RunWriteAsync(
+                var repairResult = await RunWriteAsync(
                     repairer,
                     workingDirectory,
                     BuildRepairPrompt(request, plan, challenge, finalReview),
                     cancellationToken);
+
+                var disputeReason = ParseRepairDispute(repairResult);
+                if (disputeReason is not null)
+                {
+                    progress($"{repairer.ToFriendlyName()} 認為審查意見可能誤判，提出反駁：{OneLine(disputeReason, 200)}");
+                    progress($"{roundFinal.ToFriendlyName()}：重新裁決 Repairer 的反駁…");
+                    finalReview = await RunReadOnlyAsync(
+                        roundFinal,
+                        workingDirectory,
+                        BuildDisputeReviewPrompt(request, plan, challenge, finalReview, disputeReason, diff, bump),
+                        cancellationToken);
+
+                    if (ReviewPassed(finalReview))
+                    {
+                        progress("Final Review：反駁成立，PASS");
+                        break;
+                    }
+
+                    progress("Final Review：反駁不成立，仍要求修正。");
+                    continue;
+                }
+
                 await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
             }
 
@@ -339,11 +361,12 @@ public sealed class ChangeTaskService
     private async Task<string> RunReadOnlyAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken) =>
         await RunProviderAsync(provider, workingDirectory, prompt, false, cancellationToken);
 
-    private async Task RunWriteAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken)
+    private async Task<string> RunWriteAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken)
     {
         var result = await RunProviderAsync(provider, workingDirectory, prompt, true, cancellationToken);
         if (string.IsNullOrWhiteSpace(result))
             throw new InvalidOperationException($"{provider.ToFriendlyName()} 沒有回傳實作結果。");
+        return result;
     }
 
     private async Task<string> RunProviderAsync(
@@ -511,7 +534,40 @@ Challenge:
 Final review:
 {finalReview}
 
-Make the required edits and run relevant tests. Do not commit, tag, push, merge, or modify anything outside this worktree. Summarize repairs and verification performed.
+Note: the plan and evidence above were produced at the start of this task. The code may have changed since then, from your own earlier implementation or repair rounds. Re-check the actual current file contents before editing — do not blindly trust descriptions written before those changes.
+
+If, after re-checking the actual code, you believe the review's requested change is a false positive (the concern does not really apply, or is already handled), you may dispute it instead of making a speculative edit: make no file changes and start your entire response with exactly this first line:
+AITeamRepairStance: DISPUTE
+Then explain your reasoning in Traditional Chinese for why no change is needed. AITeam will send your reasoning back to the reviewer for a final decision; if they disagree, you will be asked to make the edit next round.
+
+Otherwise, make the required edits and run relevant tests. Do not commit, tag, push, merge, or modify anything outside this worktree. Summarize repairs and verification performed.
+""";
+
+    private static string BuildDisputeReviewPrompt(
+        string request, string plan, string challenge, string finalReview, string disputeReason, string diff, VersionBump plannedBump) => $"""
+You are AITeam Final Reviewer / adjudicator, re-adjudicating your own earlier verdict. Do not modify files.
+Request: {request}
+Plan:
+{plan}
+Independent challenge:
+{challenge}
+Your earlier verdict (requested REPAIR):
+{finalReview}
+The Repair implementer disputes this verdict instead of making changes. Their reasoning:
+{disputeReason}
+Diff (unchanged since your earlier verdict, no edits were made):
+{diff}
+
+Decide again with an open mind: if the implementer's reasoning is correct and there is no real blocking issue, change your verdict to PASS. If the concern still stands, keep REPAIR.
+First line MUST be exactly one of:
+AITeamReview: PASS
+AITeamReview: REPAIR
+Second line MUST be exactly one of:
+AITeamVersionBumpConfirm: PATCH
+AITeamVersionBumpConfirm: MINOR
+AITeamVersionBumpConfirm: MAJOR
+The Plan Gate originally classified the version bump as {plannedBump}.
+Then give your rationale in Traditional Chinese.
 """;
 
     internal static ChangeRisk ParseRisk(string plan)
@@ -539,6 +595,18 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
         if (review.Contains("AITeamVersionBumpConfirm: MINOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Minor;
         if (review.Contains("AITeamVersionBumpConfirm: PATCH", StringComparison.OrdinalIgnoreCase)) return VersionBump.Patch;
         return VersionBump.None;
+    }
+
+    internal static string? ParseRepairDispute(string repairResult)
+    {
+        var text = repairResult.TrimStart();
+        if (!text.StartsWith("AITeamRepairStance: DISPUTE", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
+        lines.RemoveAt(0);
+        var reason = string.Join(Environment.NewLine, lines).Trim();
+        return reason.Length == 0 ? "（未提供理由）" : reason;
     }
 
     private static ProviderId Pick(IReadOnlyCollection<ProviderId> available, params ProviderId[] preferences)
