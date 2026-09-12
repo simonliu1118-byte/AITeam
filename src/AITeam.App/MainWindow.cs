@@ -138,7 +138,7 @@ public sealed class MainWindow : Form
 
         header.Controls.Add(title);
         header.Controls.Add(version);
-        header.Controls.Add(_modeBadge);
+        header.Controls.Add(_modeBade);
         header.Resize += (_, _) =>
             _modeBadge.Location = new Point(Math.Max(0, header.ClientSize.Width - _modeBadge.Width - 22), 20);
         return header;
@@ -184,7 +184,7 @@ public sealed class MainWindow : Form
         _requestBox.BackColor = CardBackground;
         _requestBox.ForeColor = PrimaryText;
         _requestBox.Font = new Font("Microsoft JhengHei UI", 11F);
-        _requestBox.PlaceholderText = "輸入任務或查詢內容…";
+        _requestBox.PlaceholderText = "貸番任務或查詢內容…";
         _requestBox.TextChanged += (_, _) => RefreshSendButton();
         requestCard.Controls.Add(_requestBox);
         layout.Controls.Add(requestCard, 0, 4);
@@ -200,7 +200,7 @@ public sealed class MainWindow : Form
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(new Label
         {
-            Text = "執行中贋可克輸入下价；完成前「送出「會俞莓莂定宙.",
+            Text = "任務執行中仍可先輸入下件；完成前「送出」會保持鎢定。",
             AutoSize = true,
             ForeColor = SecondaryText,
             Anchor = AnchorStyles.Left,
@@ -261,7 +261,7 @@ public sealed class MainWindow : Form
         _projectButton.BackColor = Color.White;
         _projectButton.ForeColor = PrimaryText;
         _projectButton.Margin = Padding.Empty;
-        _projectButton.FlatAppearance.BorderColor = BorderColor;
+        _projectButtton.FlatAppearance.BorderColor = BorderColor;
         _projectButton.Click += (_, _) => OpenProjectManager();
 
         layout.Controls.Add(_projectBox, 0, 0);
@@ -298,7 +298,7 @@ public sealed class MainWindow : Form
         };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        titleRow.Controls.Add(SectionTitle("AI 狂慉", new Padding(2, 7, 0, 0)), 0, 0);
+        titleRow.Controls.Add(SectionTitle("AI 狀態", new Padding(2, 7, 0, 0)), 0, 0);
 
         _recheckButton.Text = "重新檢查";
         _recheckButton.AutoSize = false;
@@ -327,7 +327,7 @@ public sealed class MainWindow : Form
         };
         card.SessionEnabledChanged += (_, enabled) =>
         {
-            if (!enabled) card.SetDisabled();
+            if (!enabled) card.SetManualDisabled();
             else card.SetHealth(new ProviderHealth(provider, ProviderHealthState.Unknown, "待重新檢查", TimeSpan.Zero));
         };
         _providerCards[provider] = card;
@@ -389,7 +389,7 @@ public sealed class MainWindow : Form
         currentCard.Controls.Add(currentLayout);
         layout.Controls.Add(currentCard, 0, 1);
 
-        layout.Controls.Add(SectionTitle("執行逰度 / 結果", new Padding(2, 16, 0, 7)), 0, 2);
+        layout.Controls.Add(SectionTitle("執行進度 / 結果", new Padding(2, 16, 0, 7)), 0, 2);
 
         var logCard = new RoundedCard
         {
@@ -430,7 +430,7 @@ public sealed class MainWindow : Form
 
             if (_projectBox.Items.Count == 0)
             {
-                _projectInfo.Text = "尚未虻錄的專案，請按「管理專案「新加、";
+                _projectInfo.Text = "尚未登錄專案，請按「管理專案」新增。";
                 return;
             }
 
@@ -451,7 +451,7 @@ public sealed class MainWindow : Form
             AppendLog($"Project registry: {_projectRegistry.RegistryPath ?? "(not found)"}");
             AppendLog($"Projects loaded: {_projects.Count}");
         }
-        catch (Exception ex) { AppendLog($"[ERROR] 請可用尌案登錄已更新：{ex.Message}"); }
+        catch (Exception ex) { AppendLog($"[ERROR] 載入專案失敗：{ex.Message}"); }
     }
 
     private void OpenProjectManager()
@@ -480,7 +480,7 @@ public sealed class MainWindow : Form
         _recheckButton.Enabled = false;
         AppendLog("開始檢查三個 AI...");
         foreach (var provider in Enum.GetValues<ProviderId>())
-            if (_providerCards[provider].SessionEnabled) _providerCards[provider].Sethealth(ProviderHealth.Checking(provider));
+            if (_providerCards[provider].SessionEnabled) _providerCards[provider].SetHealth(ProviderHealth.Checking(provider));
 
         var tasks = Enum.GetValues<ProviderId>()
             .Where(p => _providerCards[p].SessionEnabled)
@@ -489,8 +489,8 @@ public sealed class MainWindow : Form
         foreach (var item in tasks)
         {
             var health = await item.Value;
-            _providerCards[item.Key].Sethealth(health);
-            AppendLog("{FriendlyProvider(item.Key)}：{FriendlyState(health)} ({health.Duration.TotalSeconds:0.0}s)");
+            _providerCards[item.Key].SetHealth(health);
+            AppendLog($"{FriendlyProvider(item.Key)}：{FriendlyState(health)} ({health.Duration.TotalSeconds:0.0}s)");
         }
         _recheckButton.Enabled = true;
         AppendLog("AI 檢查完成。");
