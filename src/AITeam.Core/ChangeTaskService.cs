@@ -163,7 +163,7 @@ public sealed class ChangeTaskService
                 finalReview = await RunReadOnlyAsync(
                     roundFinal,
                     workingDirectory,
-                    BuildFinalReviewPrompt(request, plan, challenge, diff, selfReview: roundChallenger == roundFinal),
+                    BuildFinalReviewPrompt(request, plan, challenge, diff, bump, selfReview: roundChallenger == roundFinal),
                     cancellationToken);
 
                 if (ReviewPassed(finalReview))
@@ -185,6 +185,13 @@ public sealed class ChangeTaskService
                     BuildRepairPrompt(request, plan, challenge, finalReview),
                     cancellationToken);
                 await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+            }
+
+            var confirmedBump = ParseVersionBumpConfirm(finalReview);
+            if (confirmedBump != VersionBump.None && confirmedBump != bump)
+            {
+                progress($"Final Reviewer 依實際變更重新確認版號等級：{bump} → {confirmedBump}");
+                bump = confirmedBump;
             }
 
             var (newVersion, tag) = await BumpVersionAsync(project, workingDirectory, bump, cancellationToken);
@@ -473,7 +480,7 @@ AITeamReview: REPAIR
 Then explain concrete findings in Traditional Chinese. Do not request cosmetic changes unless they materially improve correctness or the requested behavior.
 """;
 
-    private static string BuildFinalReviewPrompt(string request, string plan, string challenge, string diff, bool selfReview) => $"""
+    private static string BuildFinalReviewPrompt(string request, string plan, string challenge, string diff, VersionBump plannedBump, bool selfReview) => $"""
 You are AITeam Final Reviewer / adjudicator. Do not modify files. Decide whether this change is safe and complete enough to formalize.
 Request: {request}
 Plan:
@@ -486,7 +493,12 @@ Diff:
 First line MUST be exactly one of:
 AITeamReview: PASS
 AITeamReview: REPAIR
-Then give the final rationale in Traditional Chinese. PASS only when the request is satisfied and no blocking correctness/safety issue remains.
+Second line MUST be exactly one of:
+AITeamVersionBumpConfirm: PATCH
+AITeamVersionBumpConfirm: MINOR
+AITeamVersionBumpConfirm: MAJOR
+The Plan Gate originally classified the version bump as {plannedBump}; re-confirm it against the actual diff above instead of repeating the planned value blindly — implementation or repair rounds may have changed the scope.
+Then give the final rationale in Traditional Chinese. PASS only when the request is satisfied and no blocking correctness/safety issue remains. If you PASS, AITeam will separately apply a purely mechanical version-file edit afterwards based on your AITeamVersionBumpConfirm value; you do not need to review that follow-up edit.
 """;
 
     private static string BuildRepairPrompt(string request, string plan, string challenge, string finalReview) => $"""
@@ -520,6 +532,14 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
     internal static bool ReviewPassed(string review) =>
         review.Contains("AITeamReview: PASS", StringComparison.OrdinalIgnoreCase) &&
         !review.Contains("AITeamReview: REPAIR", StringComparison.OrdinalIgnoreCase);
+
+    internal static VersionBump ParseVersionBumpConfirm(string review)
+    {
+        if (review.Contains("AITeamVersionBumpConfirm: MAJOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Major;
+        if (review.Contains("AITeamVersionBumpConfirm: MINOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Minor;
+        if (review.Contains("AITeamVersionBumpConfirm: PATCH", StringComparison.OrdinalIgnoreCase)) return VersionBump.Patch;
+        return VersionBump.None;
+    }
 
     private static ProviderId Pick(IReadOnlyCollection<ProviderId> available, params ProviderId[] preferences)
     {
