@@ -138,7 +138,7 @@ public sealed class MainWindow : Form
 
         header.Controls.Add(title);
         header.Controls.Add(version);
-        header.Controls.Add(_modeBade);
+        header.Controls.Add(_modeBadge);
         header.Resize += (_, _) =>
             _modeBadge.Location = new Point(Math.Max(0, header.ClientSize.Width - _modeBadge.Width - 22), 20);
         return header;
@@ -184,7 +184,7 @@ public sealed class MainWindow : Form
         _requestBox.BackColor = CardBackground;
         _requestBox.ForeColor = PrimaryText;
         _requestBox.Font = new Font("Microsoft JhengHei UI", 11F);
-        _requestBox.PlaceholderText = "貸番任務或查詢內容…";
+        _requestBox.PlaceholderText = "輸入任務或查詢內容…";
         _requestBox.TextChanged += (_, _) => RefreshSendButton();
         requestCard.Controls.Add(_requestBox);
         layout.Controls.Add(requestCard, 0, 4);
@@ -200,7 +200,7 @@ public sealed class MainWindow : Form
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(new Label
         {
-            Text = "任務執行中仍可先輸入下件；完成前「送出」會保持鎢定。",
+            Text = "任務執行中仍可先輸入下一件；完成前「送出」會保持鎖定。",
             AutoSize = true,
             ForeColor = SecondaryText,
             Anchor = AnchorStyles.Left,
@@ -261,7 +261,7 @@ public sealed class MainWindow : Form
         _projectButton.BackColor = Color.White;
         _projectButton.ForeColor = PrimaryText;
         _projectButton.Margin = Padding.Empty;
-        _projectButtton.FlatAppearance.BorderColor = BorderColor;
+        _projectButton.FlatAppearance.BorderColor = BorderColor;
         _projectButton.Click += (_, _) => OpenProjectManager();
 
         layout.Controls.Add(_projectBox, 0, 0);
@@ -451,7 +451,10 @@ public sealed class MainWindow : Form
             AppendLog($"Project registry: {_projectRegistry.RegistryPath ?? "(not found)"}");
             AppendLog($"Projects loaded: {_projects.Count}");
         }
-        catch (Exception ex) { AppendLog($"[ERROR] 載入專案失敗：{ex.Message}"); }
+        catch (Exception ex)
+        {
+            AppendLog($"[ERROR] 載入專案失敗：{ex.Message}");
+        }
     }
 
     private void OpenProjectManager()
@@ -480,7 +483,10 @@ public sealed class MainWindow : Form
         _recheckButton.Enabled = false;
         AppendLog("開始檢查三個 AI...");
         foreach (var provider in Enum.GetValues<ProviderId>())
-            if (_providerCards[provider].SessionEnabled) _providerCards[provider].SetHealth(ProviderHealth.Checking(provider));
+        {
+            if (_providerCards[provider].SessionEnabled)
+                _providerCards[provider].SetHealth(ProviderHealth.Checking(provider));
+        }
 
         var tasks = Enum.GetValues<ProviderId>()
             .Where(p => _providerCards[p].SessionEnabled)
@@ -631,13 +637,10 @@ public sealed class MainWindow : Form
             return;
         }
         if (text.Length == 0)
-        {
             _outputBox.AppendText(Environment.NewLine);
-        }
         else
-        {
             _outputBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}\r\n");
-        }
+
         _outputBox.SelectionStart = _outputBox.TextLength;
         _outputBox.ScrollToCaret();
     }
