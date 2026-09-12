@@ -42,19 +42,17 @@ jobs:
               re.compile(r'^GOVERNANCE_VERSION$'),
               re.compile(r'^GOVERNANCE_CHANGELOG\.md$'),
               re.compile(r'^AGENTS\.md$'),
-              re.compile(r'^\.github/workflows/governance-check\.yml$'),
           ]
-          suspicious = re.compile(r'(?i)(rules|policy|instruction|governance)')
-          legacy_allowed = {'docs/TEAM_RULES.md'}
+          suspicious = re.compile(r'(?i)(rules|policy|instruction|governance|versioning|agents)')
 
           for path in pathlib.Path('.').rglob('*'):
               if not path.is_file() or '.git' in path.parts:
                   continue
               rel = path.as_posix()
-              if rel in legacy_allowed:
+              if path.suffix.lower() not in {'.md', '.txt'} and path.name != 'AGENTS.md':
                   continue
               if suspicious.search(path.name) and not any(rx.fullmatch(rel) for rx in allowed):
-                  print(f'ERROR: unauthorized governance/rules file: {rel}')
+                  print(f'ERROR: unauthorized/obsolete rules entrypoint: {rel}')
                   sys.exit(1)
 
           for rel in ['COMMON_RULES_VERSION','GOVERNANCE_VERSION','VERSION']:
@@ -84,6 +82,7 @@ jobs:
             mapfile -t changed < <(git diff --name-only "origin/main...HEAD")
 
             common_changed=0
+            common_rules_changed=0
             common_version_changed=0
             common_changelog_changed=0
             repo_gov_changed=0
@@ -95,6 +94,7 @@ jobs:
                 REPOSITORY_RULES.md|COMMON_RULES_VERSION|COMMON_RULES_CHANGELOG.md)
                   common_changed=1 ;;
               esac
+              [ "$path" = "REPOSITORY_RULES.md" ] && common_rules_changed=1
               [ "$path" = "COMMON_RULES_VERSION" ] && common_version_changed=1
               [ "$path" = "COMMON_RULES_CHANGELOG.md" ] && common_changelog_changed=1
 
@@ -108,6 +108,7 @@ jobs:
 
             if [ "$common_changed" -eq 1 ]; then
               case "$HEAD_REF" in governance/*) ;; *) echo "ERROR: common rules require governance/* branch"; exit 1 ;; esac
+              [ "$common_rules_changed" -eq 1 ] || { echo "ERROR: common rules change must update REPOSITORY_RULES.md"; exit 1; }
               [ "$common_version_changed" -eq 1 ] || { echo "ERROR: common rules change must update COMMON_RULES_VERSION"; exit 1; }
               [ "$common_changelog_changed" -eq 1 ] || { echo "ERROR: common rules change must update COMMON_RULES_CHANGELOG.md"; exit 1; }
             fi
