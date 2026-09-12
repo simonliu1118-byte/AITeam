@@ -25,7 +25,8 @@ public sealed record ChangeTaskResult(
     ChangeRisk Risk,
     string Version,
     string Tag,
-    string Summary);
+    string Summary,
+    bool DegradedReview = false);
 
 public sealed class ChangeTaskService
 {
@@ -126,29 +127,43 @@ public sealed class ChangeTaskService
                 ProviderId.Antigravity,
                 ProviderId.Codex,
                 ProviderId.Claude);
-            ProviderId finalProvider = PickDifferent(
+
+            var degradedReview = !TryPickDifferentFromAny(
                 available,
-                implementer,
-                ProviderId.Codex,
-                ProviderId.Antigravity,
-                ProviderId.Claude);
+                new[] { implementer, challengeProvider },
+                new[] { ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude },
+                out var finalProvider);
+            if (degradedReview)
+            {
+                finalProvider = challengeProvider;
+                progress($"⚠️ 僅 {available.Count} 個 AI 上線，Challenge 與 Final Review 將由同一個 AI（{challengeProvider.ToFriendlyName()}）執行，獨立性下降。");
+            }
 
             string finalReview = string.Empty;
+            var lastFinalReviewer = finalProvider;
             for (var round = 0; round <= _workflow.MaxRepairRounds; round++)
             {
+                // 3 個 AI 都在線時，從第 2 輪起讓 Challenger / Final Reviewer 互換身分，
+                // 讓「第二意見」來自不同視角，而不是同一個審查者重複審自己說過的話。
+                var roundChallenger = !degradedReview && round % 2 == 1 ? finalProvider : challengeProvider;
+                var roundFinal = !degradedReview && round % 2 == 1 ? challengeProvider : finalProvider;
+                lastFinalReviewer = roundFinal;
+                if (degradedReview)
+                    progress($"⚠️ 僅 2 個 AI 上線，本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
+
                 var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
-                progress($"{challengeProvider.ToFriendlyName()}：獨立 Challenge…");
+                progress($"{roundChallenger.ToFriendlyName()}：獨立 Challenge…");
                 var challenge = await RunReadOnlyAsync(
-                    challengeProvider,
+                    roundChallenger,
                     workingDirectory,
                     BuildChallengePrompt(request, plan, diff),
                     cancellationToken);
 
-                progress($"{finalProvider.ToFriendlyName()}：Final Review…");
+                progress($"{roundFinal.ToFriendlyName()}：Final Review…");
                 finalReview = await RunReadOnlyAsync(
-                    finalProvider,
+                    roundFinal,
                     workingDirectory,
-                    BuildFinalReviewPrompt(request, plan, challenge, diff),
+                    BuildFinalReviewPrompt(request, plan, challenge, diff, selfReview: roundChallenger == roundFinal),
                     cancellationToken);
 
                 if (ReviewPassed(finalReview))
@@ -216,13 +231,18 @@ public sealed class ChangeTaskService
             progress("GitHub 正式版本已完成。同步本機預設分支…");
             await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
+            var summary = $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}）。";
+            if (degradedReview)
+                summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降。";
+
             return new ChangeTaskResult(
                 implementer,
-                finalProvider,
+                lastFinalReviewer,
                 risk,
                 newVersion,
                 tag,
-                $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}）。");
+                summary,
+                degradedReview);
         }
         finally
         {
@@ -453,7 +473,7 @@ AITeamReview: REPAIR
 Then explain concrete findings in Traditional Chinese. Do not request cosmetic changes unless they materially improve correctness or the requested behavior.
 """;
 
-    private static string BuildFinalReviewPrompt(string request, string plan, string challenge, string diff) => $"""
+    private static string BuildFinalReviewPrompt(string request, string plan, string challenge, string diff, bool selfReview) => $"""
 You are AITeam Final Reviewer / adjudicator. Do not modify files. Decide whether this change is safe and complete enough to formalize.
 Request: {request}
 Plan:
@@ -462,7 +482,7 @@ Independent challenge:
 {challenge}
 Diff:
 {diff}
-
+{(selfReview ? "\nNote: you already wrote the independent challenge above in this same round (only two AI are currently online). Now switch fully into the independent-reviewer role: be skeptical of your own earlier challenge and look for anything it missed or was too lenient about.\n" : "")}
 First line MUST be exactly one of:
 AITeamReview: PASS
 AITeamReview: REPAIR
@@ -513,6 +533,24 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
         foreach (var provider in preferences)
             if (provider != excluded && available.Contains(provider)) return provider;
         throw new InvalidOperationException("缺少可與實作者獨立的審查 AI，因此不會正式化修改。");
+    }
+
+    internal static bool TryPickDifferentFromAny(
+        IReadOnlyCollection<ProviderId> available,
+        IReadOnlyCollection<ProviderId> excluded,
+        IReadOnlyList<ProviderId> preferences,
+        out ProviderId result)
+    {
+        foreach (var provider in preferences)
+        {
+            if (!excluded.Contains(provider) && available.Contains(provider))
+            {
+                result = provider;
+                return true;
+            }
+        }
+        result = default;
+        return false;
     }
 
     private async Task<ProcessRunResult> RunGitAsync(string workingDirectory, IEnumerable<string> args, CancellationToken cancellationToken) =>
