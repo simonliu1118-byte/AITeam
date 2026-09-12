@@ -32,12 +32,17 @@ public sealed class ChangeTaskService
     private readonly string _runtimeRoot;
     private readonly IProcessRunner _runner;
     private readonly GitRepositoryService _git;
+    private readonly WorkflowSettings _workflow;
+    private readonly AgentsConfig _agents;
 
     public ChangeTaskService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
         _git = new GitRepositoryService(runtimeRoot, runner);
+        var config = new RuntimeConfigService(runtimeRoot);
+        _workflow = config.LoadWorkflowSettings();
+        _agents = config.LoadAgentsConfig();
     }
 
     public async Task<ChangeTaskResult> RunAsync(
@@ -129,7 +134,7 @@ public sealed class ChangeTaskService
                 ProviderId.Claude);
 
             string finalReview = string.Empty;
-            for (var round = 0; round <= 3; round++)
+            for (var round = 0; round <= _workflow.MaxRepairRounds; round++)
             {
                 var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
                 progress($"{challengeProvider.ToFriendlyName()}：獨立 Challenge…");
@@ -152,8 +157,8 @@ public sealed class ChangeTaskService
                     break;
                 }
 
-                if (round == 3)
-                    throw new InvalidOperationException("三輪修正後 Final Review 仍未通過。工作區已保留供檢查，不會合併或推送。");
+                if (round == _workflow.MaxRepairRounds)
+                    throw new InvalidOperationException($"{_workflow.MaxRepairRounds} 輪修正後 Final Review 仍未通過。工作區已保留供檢查，不會合併或推送。");
 
                 var repairer = available.Contains(implementer)
                     ? implementer
@@ -345,7 +350,7 @@ public sealed class ChangeTaskService
                 "exec", "--skip-git-repo-check", "--output-last-message", lastMessage, "-"
             };
             var result = await _runner.RunAsync(
-                "codex", args, workingDirectory, prompt, TimeSpan.FromMinutes(15), cancellationToken);
+                _agents.CodexCommand, args, workingDirectory, prompt, TimeSpan.FromMinutes(15), cancellationToken);
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
             return File.Exists(lastMessage)
@@ -370,7 +375,7 @@ public sealed class ChangeTaskService
             "--no-session-persistence"
         };
         var result = await _runner.RunAsync(
-            "claude", args, workingDirectory, null, TimeSpan.FromMinutes(15), cancellationToken);
+            _agents.ClaudeCommand, args, workingDirectory, null, TimeSpan.FromMinutes(15), cancellationToken);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
         return result.StandardOutput;
@@ -384,7 +389,7 @@ public sealed class ChangeTaskService
             message = new { content = prompt }
         }) + Environment.NewLine;
         var result = await _runner.RunAsync(
-            "agy",
+            _agents.AntigravityCommand,
             new[]
             {
                 "--dangerously-skip-permissions",
