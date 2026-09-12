@@ -1,24 +1,33 @@
 name: Build AITeam Windows Portable
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "config-templates/**"
+      - "VERSION"
+      - "BUILD"
+      - ".github/workflows/build-windows.yml"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: aiteam-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -29,19 +38,39 @@ jobs:
         run: dotnet test tests/AITeam.Core.Tests/AITeam.Core.Tests.csproj -c Release
 
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     needs: test
     runs-on: windows-2022
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v7
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Read VERSION and BUILD
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath .\VERSION -Raw).Trim()
+          $build = (Get-Content -LiteralPath .\BUILD -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid VERSION: $version" }
+          if ($build -notmatch '^\d+$') { throw "Invalid BUILD: $build" }
+
+          $display = "V$version"
+          $fileLabel = "v$version"
+          if ([int]$build -gt 0) {
+            $display = "$display Build $build"
+            $fileLabel = "$fileLabel-Build$build"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "build=$build" >> $env:GITHUB_OUTPUT
+          "display=$display" >> $env:GITHUB_OUTPUT
+          "file_label=$fileLabel" >> $env:GITHUB_OUTPUT
 
       - name: Restore win-x64
         shell: pwsh
@@ -61,13 +90,6 @@ jobs:
           --no-restore
           -o .\artifacts\publish
 
-      - name: Read version
-        id: version
-        shell: pwsh
-        run: |
-          $version = (Get-Content -LiteralPath .\VERSION -Raw).Trim()
-          "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Validate clean publish
         shell: pwsh
         run: |
@@ -81,14 +103,12 @@ jobs:
             throw "Single-file publish produced loose DLL files: $($unexpectedDlls.Name -join ', ')"
           }
 
-          Write-Host "Publish output:"
-          Get-ChildItem -LiteralPath .\artifacts\publish -Force | Select-Object Name, Length
-
-      - name: Create clean ZIP package
+      - name: Create clean engineering ZIP package
         shell: pwsh
         run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $folderName = "AITeam-$version-win-x64"
+          $fileLabel = "${{ steps.version.outputs.file_label }}"
+          $display = "${{ steps.version.outputs.display }}"
+          $folderName = "AITeam-$fileLabel-win-x64"
           $packageRoot = ".\artifacts\package"
           $packageDir = Join-Path $packageRoot $folderName
           $zip = ".\artifacts\$folderName.zip"
@@ -96,14 +116,16 @@ jobs:
           Remove-Item -LiteralPath $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
-
           Copy-Item -LiteralPath .\artifacts\publish\AITeam.exe -Destination (Join-Path $packageDir "AITeam.exe") -Force
 
           $note = @"
-          AITeam $version
+          AITeam $display
 
+          Engineering / verification build.
           直接雙擊 AITeam.exe 即可執行，不需要另外安裝 .NET。
-          測試版會沿用 D:\AITeam 的既有專案與設定資料。
+          測試包會沿用 D:\AITeam 的既有專案與設定資料。
+          GitHub workflow run: $env:GITHUB_RUN_NUMBER
+          Commit: $env:GITHUB_SHA
           "@
           [System.IO.File]::WriteAllText(
             (Join-Path $packageDir "使用說明.txt"),
@@ -112,42 +134,10 @@ jobs:
 
           Compress-Archive -Path $packageDir -DestinationPath $zip -CompressionLevel Optimal
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload engineering artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: AITeam-${{ steps.version.outputs.version }}-win-x64
-          path: artifacts/AITeam-${{ steps.version.outputs.version }}-win-x64.zip
+          name: AITeam-${{ steps.version.outputs.file_label }}-win-x64-run${{ github.run_number }}
+          path: artifacts/AITeam-${{ steps.version.outputs.file_label }}-win-x64.zip
           if-no-files-found: error
-
-      - name: Tag and publish GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $tag = "v$version"
-          $zip = "artifacts/AITeam-$version-win-x64.zip"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch --tags --force
-
-          $existing = git rev-parse -q --verify "refs/tags/$tag" 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            $existing = $existing.Trim()
-            if ($existing -ne $env:GITHUB_SHA) {
-              throw "Version $version already has tag $tag on another commit. Bump VERSION before merging another change."
-            }
-          }
-          else {
-            git tag -a $tag $env:GITHUB_SHA -m "AITeam $tag"
-            git push origin $tag
-          }
-
-          if (gh release view $tag *> $null) {
-            gh release upload $tag $zip --clobber
-          }
-          else {
-            gh release create $tag $zip --title "AITeam $tag" --generate-notes
-          }
+          retention-days: 14
