@@ -28,6 +28,7 @@ public sealed class InquiryService
     private readonly string _runtimeRoot;
     private readonly IProcessRunner _runner;
     private readonly ChangeTaskService _changeTaskService;
+    private readonly GitRepositoryService _git;
     private readonly AgentsConfig _agents;
 
     public InquiryService(string runtimeRoot, IProcessRunner runner)
@@ -35,6 +36,7 @@ public sealed class InquiryService
         _runtimeRoot = runtimeRoot;
         _runner = runner;
         _changeTaskService = new ChangeTaskService(runtimeRoot, runner);
+        _git = new GitRepositoryService(runtimeRoot, runner);
         _agents = new RuntimeConfigService(runtimeRoot).LoadAgentsConfig();
     }
 
@@ -56,6 +58,9 @@ public sealed class InquiryService
 
         try
         {
+            progress("同步 GitHub 預設分支並確認本機 Repo 安全狀態…");
+            await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
+
             progress("建立唯讀查詢隔離區…");
             var add = await _runner.RunAsync(
                 "git",
