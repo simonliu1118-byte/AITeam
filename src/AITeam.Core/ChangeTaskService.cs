@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AITeam.Models;
@@ -18,6 +19,23 @@ public enum VersionBump
     Minor,
     Major
 }
+
+public enum PlanGateStage
+{
+    NeedsInput,
+    ReadyForConfirmation
+}
+
+public enum PlanGateAction
+{
+    Reply,
+    Finalize,
+    HandOff
+}
+
+public sealed record PlanGatePrompt(PlanGateStage Stage, string Body);
+
+public sealed record PlanGateResponse(PlanGateAction Action, string? Text = null);
 
 public sealed record ChangeTaskResult(
     ProviderId Implementer,
@@ -50,6 +68,7 @@ public sealed class ChangeTaskService
         ProjectEntry project,
         string request,
         IReadOnlyList<ProviderId> availableProviders,
+        Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
         CancellationToken cancellationToken)
     {
@@ -100,16 +119,34 @@ public sealed class ChangeTaskService
                 cancellationToken);
 
             var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
-            progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
-            var plan = await RunReadOnlyAsync(
-                planner,
-                workingDirectory,
-                BuildPlanPrompt(project, request, scoutReport),
-                cancellationToken);
-            var risk = ParseRisk(plan);
-            var bump = ParseVersionBump(plan);
-            if (bump == VersionBump.None) bump = VersionBump.Patch;
-            progress($"Plan Gate：Risk={risk}，Version={bump}");
+            var (plan, risk, bump) = await RunPlanGateDiscussionAsync(
+                project, request, scoutReport, planner, workingDirectory, askUser, progress, cancellationToken);
+
+            progress("計畫已定案；重新同步 GitHub 預設分支並重新鎖定基準版本…");
+            var refreshedBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
+            var refreshedBaseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
+            if (!refreshedBaseSha.Equals(baseSha, StringComparison.OrdinalIgnoreCase))
+            {
+                progress("偵測到討論期間 GitHub 預設分支已有新 commit，重新建立工作區以基於最新版本繼續…");
+                await _runner.RunAsync(
+                    "git",
+                    new[] { "worktree", "remove", "--force", worktreeRoot },
+                    project.RepoPath,
+                    null,
+                    TimeSpan.FromMinutes(1),
+                    cancellationToken);
+                baseSha = refreshedBaseSha;
+                defaultBranch = refreshedBranch;
+                var recreate = await _runner.RunAsync(
+                    "git",
+                    new[] { "worktree", "add", "-B", taskBranch, worktreeRoot, baseSha },
+                    project.RepoPath,
+                    null,
+                    TimeSpan.FromMinutes(2),
+                    cancellationToken);
+                if (recreate.ExitCode != 0)
+                    throw new InvalidOperationException("重新建立修改工作區失敗：" + FirstUsefulLine(recreate.StandardError, recreate.StandardOutput));
+            }
 
             var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
             progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
@@ -139,8 +176,15 @@ public sealed class ChangeTaskService
                 progress($"⚠️ 僅 {available.Count} 個 AI 上線，Challenge 與 Final Review 將由同一個 AI（{challengeProvider.ToFriendlyName()}）執行，獨立性下降。");
             }
 
+            if (degradedReview && risk == ChangeRisk.Low)
+            {
+                risk = ChangeRisk.Normal;
+                progress("⚠️ 獨立審查被削弱本身就是風險因子，有效風險等級提升一級：LOW → NORMAL。");
+            }
+
             string finalReview = string.Empty;
             var lastFinalReviewer = finalProvider;
+            var lastChallenger = challengeProvider;
             for (var round = 0; round <= _workflow.MaxRepairRounds; round++)
             {
                 // 3 個 AI 都在線時，從第 2 輪起讓 Challenger / Final Reviewer 互換身分，
@@ -148,6 +192,7 @@ public sealed class ChangeTaskService
                 var roundChallenger = !degradedReview && round % 2 == 1 ? finalProvider : challengeProvider;
                 var roundFinal = !degradedReview && round % 2 == 1 ? challengeProvider : finalProvider;
                 lastFinalReviewer = roundFinal;
+                lastChallenger = roundChallenger;
                 if (degradedReview)
                     progress($"⚠️ 僅 2 個 AI 上線，本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
 
@@ -179,11 +224,33 @@ public sealed class ChangeTaskService
                     ? implementer
                     : Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
                 progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
-                await RunWriteAsync(
+                var repairResult = await RunWriteAsync(
                     repairer,
                     workingDirectory,
                     BuildRepairPrompt(request, plan, challenge, finalReview),
                     cancellationToken);
+
+                var disputeReason = ParseRepairDispute(repairResult);
+                if (disputeReason is not null)
+                {
+                    progress($"{repairer.ToFriendlyName()} 認為審查意見可能誤判，提出反駁：{OneLine(disputeReason, 200)}");
+                    progress($"{roundFinal.ToFriendlyName()}：重新裁決 Repairer 的反駁…");
+                    finalReview = await RunReadOnlyAsync(
+                        roundFinal,
+                        workingDirectory,
+                        BuildDisputeReviewPrompt(request, plan, challenge, finalReview, disputeReason, diff, bump),
+                        cancellationToken);
+
+                    if (ReviewPassed(finalReview))
+                    {
+                        progress("Final Review：反駁成立，PASS");
+                        break;
+                    }
+
+                    progress("Final Review：反駁不成立，仍要求修正。");
+                    continue;
+                }
+
                 await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
             }
 
@@ -205,42 +272,100 @@ public sealed class ChangeTaskService
 
             var commitMessage = "AITeam: " + OneLine(request, 72);
             await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", commitMessage }, cancellationToken);
-            var taskCommit = (await RunGitCheckedAsync(worktreeRoot, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
 
-            progress("正式化前重新確認 GitHub 預設分支沒有被其他工作更新…");
-            await RunGitCheckedAsync(project.RepoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
-            var remoteSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", $"origin/{defaultBranch}" }, cancellationToken)).StandardOutput.Trim();
-            if (!remoteSha.Equals(baseSha, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("執行期間 GitHub 預設分支已出現新 commit。為避免覆蓋他人工作，本次不會推送；工作區已保留。");
-
-            var tagExists = await RunGitAsync(worktreeRoot, new[] { "rev-parse", "-q", "--verify", $"refs/tags/{tag}" }, cancellationToken);
-            if (tagExists.ExitCode == 0)
-                throw new InvalidOperationException($"Tag {tag} 已存在，為避免覆蓋既有版本，本次停止正式化。");
-
-            await RunGitCheckedAsync(worktreeRoot, new[] { "tag", "-a", tag, "-m", $"{project.Name} {newVersion}" }, cancellationToken);
-            progress("Commit / Tag 完成，原子推送 main + tag 到 GitHub…");
-            var push = await _runner.RunAsync(
+            progress($"推送任務分支 {taskBranch} 並開啟 PR…");
+            var pushTask = await _runner.RunAsync(
                 "git",
-                new[]
-                {
-                    "push", "--atomic", "origin",
-                    $"{taskCommit}:refs/heads/{defaultBranch}",
-                    $"refs/tags/{tag}:refs/tags/{tag}"
-                },
+                new[] { "push", "-u", "origin", $"{taskBranch}:refs/heads/{taskBranch}" },
                 worktreeRoot,
                 null,
-                TimeSpan.FromMinutes(3),
+                TimeSpan.FromMinutes(2),
                 cancellationToken);
-            if (push.ExitCode != 0)
-                throw new InvalidOperationException("GitHub 原子推送失敗；main/tag 均未應部分成功。工作區已保留：" + FirstUsefulLine(push.StandardError, push.StandardOutput));
+            if (pushTask.ExitCode != 0)
+                throw new InvalidOperationException("推送任務分支失敗：" + FirstUsefulLine(pushTask.StandardError, pushTask.StandardOutput));
+
+            var prBody = BuildPrBody(request, plan, risk, degradedReview, implementer, lastChallenger, lastFinalReviewer, newVersion, tag);
+            var prNumber = await CreatePullRequestAsync(project, taskBranch, defaultBranch, commitMessage, prBody, cancellationToken);
+            var prUrl = $"https://github.com/{project.GitHubRepo}/pull/{prNumber}";
+            progress($"已開啟 PR #{prNumber}：{prUrl}");
+
+            for (var ciRound = 0; ; ciRound++)
+            {
+                progress($"等待 {project.GitHubRepo} 的 CI 檢查結果…");
+                var (ciPassed, ciSummary) = await WaitForPrChecksAsync(project, prNumber, cancellationToken);
+                if (ciPassed)
+                {
+                    progress("CI 檢查通過。");
+                    break;
+                }
+
+                if (ciRound == _workflow.MaxCiRepairRounds)
+                    throw new InvalidOperationException(
+                        $"CI 連續 {_workflow.MaxCiRepairRounds} 輪修正後仍未通過。PR 已保留供人工檢查，不會自動合併：{prUrl}");
+
+                progress($"CI 檢查失敗；{implementer.ToFriendlyName()} 依失敗訊息進行第 {ciRound + 1} 輪修正…");
+                await RunWriteAsync(
+                    implementer,
+                    workingDirectory,
+                    BuildCiRepairPrompt(request, plan, ciSummary),
+                    cancellationToken);
+                await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+                await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
+                var ciFixStatus = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
+                if (string.IsNullOrWhiteSpace(ciFixStatus.StandardOutput))
+                    throw new InvalidOperationException($"CI 修正沒有產生任何變更，無法繼續。PR 已保留：{prUrl}");
+
+                await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", $"AITeam: fix CI (round {ciRound + 1})" }, cancellationToken);
+                var pushFix = await _runner.RunAsync(
+                    "git",
+                    new[] { "push", "origin", taskBranch },
+                    worktreeRoot,
+                    null,
+                    TimeSpan.FromMinutes(2),
+                    cancellationToken);
+                if (pushFix.ExitCode != 0)
+                    throw new InvalidOperationException("推送 CI 修正失敗：" + FirstUsefulLine(pushFix.StandardError, pushFix.StandardOutput));
+            }
+
+            if (risk == ChangeRisk.High)
+            {
+                progress($"⚠️ 高風險變更，需要人工確認合併：{prUrl}");
+                await WaitForManualMergeAsync(project, prNumber, cancellationToken);
+                progress("偵測到 PR 已由人工合併。");
+            }
+            else
+            {
+                progress("風險等級允許自動合併，執行合併…");
+                await MergePullRequestAsync(project, prNumber, project.MergeStrategy, cancellationToken);
+                progress("PR 已自動合併。");
+            }
+
+            progress("合併完成；重新同步並打 tag…");
+            await RunGitCheckedAsync(project.RepoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
+            var mergeSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", $"origin/{defaultBranch}" }, cancellationToken)).StandardOutput.Trim();
+
+            var tagExists = await RunGitAsync(project.RepoPath, new[] { "rev-parse", "-q", "--verify", $"refs/tags/{tag}" }, cancellationToken);
+            if (tagExists.ExitCode == 0)
+                throw new InvalidOperationException($"Tag {tag} 已存在，為避免覆蓋既有版本，本次停止打 tag（PR 已合併，僅 tag 未完成）。");
+
+            await RunGitCheckedAsync(project.RepoPath, new[] { "tag", "-a", tag, mergeSha, "-m", $"{project.Name} {newVersion}" }, cancellationToken);
+            var pushTag = await _runner.RunAsync(
+                "git",
+                new[] { "push", "origin", $"refs/tags/{tag}:refs/tags/{tag}" },
+                project.RepoPath,
+                null,
+                TimeSpan.FromMinutes(2),
+                cancellationToken);
+            if (pushTag.ExitCode != 0)
+                throw new InvalidOperationException("Tag 推送失敗（PR 已合併，僅 tag 未完成）：" + FirstUsefulLine(pushTag.StandardError, pushTag.StandardOutput));
 
             formalized = true;
             progress("GitHub 正式版本已完成。同步本機預設分支…");
             await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
-            var summary = $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}）。";
+            var summary = $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}），PR：{prUrl}";
             if (degradedReview)
-                summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降。";
+                summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升）。";
 
             return new ChangeTaskResult(
                 implementer,
@@ -267,6 +392,17 @@ public sealed class ChangeTaskService
                 }
                 catch { }
                 try { if (Directory.Exists(worktreeRoot)) Directory.Delete(worktreeRoot, true); } catch { }
+                try
+                {
+                    await _runner.RunAsync(
+                        "git",
+                        new[] { "branch", "-D", taskBranch },
+                        project.RepoPath,
+                        null,
+                        TimeSpan.FromSeconds(30),
+                        CancellationToken.None);
+                }
+                catch { }
             }
             else if (worktreeAdded && !formalized)
             {
@@ -285,6 +421,179 @@ public sealed class ChangeTaskService
         var status = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
         if (string.IsNullOrWhiteSpace(status.StandardOutput))
             throw new InvalidOperationException("實作階段沒有產生任何變更。");
+    }
+
+    private async Task<(string Plan, ChangeRisk Risk, VersionBump Bump)> RunPlanGateDiscussionAsync(
+        ProjectEntry project,
+        string request,
+        string scoutReport,
+        ProviderId planner,
+        string workingDirectory,
+        Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
+        Action<string> progress,
+        CancellationToken cancellationToken)
+    {
+        var discussion = new StringBuilder();
+        var mustFinalize = false;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
+            var reply = await RunReadOnlyAsync(
+                planner,
+                workingDirectory,
+                BuildPlanPrompt(project, request, scoutReport, discussion.ToString(), mustFinalize),
+                cancellationToken);
+
+            if (!mustFinalize && IsPlanGateNeedsInput(reply))
+            {
+                var question = ExtractPlanGateBody(reply);
+                progress("Plan Gate 提出問題，等待使用者回覆…");
+                var response = await askUser(new PlanGatePrompt(PlanGateStage.NeedsInput, question), cancellationToken);
+
+                if (response.Action == PlanGateAction.HandOff)
+                {
+                    progress("使用者選擇交給 AI 全權判斷，Plan Gate 下一次回覆必須定案。");
+                    discussion.AppendLine("使用者：（選擇交給 AI 全權判斷，請直接定案，不要再提問）");
+                    mustFinalize = true;
+                }
+                else
+                {
+                    discussion.AppendLine("Plan Gate 提問：");
+                    discussion.AppendLine(question);
+                    discussion.AppendLine("使用者回覆：");
+                    discussion.AppendLine(response.Text ?? string.Empty);
+                }
+                continue;
+            }
+
+            var plan = ExtractPlanGateBody(reply);
+            var risk = ParseRisk(reply);
+            var bump = ParseVersionBump(reply);
+            if (bump == VersionBump.None) bump = VersionBump.Patch;
+
+            if (mustFinalize)
+            {
+                progress($"Plan Gate：Risk={risk}，Version={bump}（使用者已交給 AI 全權定案）");
+                return (plan, risk, bump);
+            }
+
+            progress("Plan Gate 認為計畫已可定案，等待使用者確認…");
+            var confirmation = await askUser(new PlanGatePrompt(PlanGateStage.ReadyForConfirmation, plan), cancellationToken);
+
+            if (confirmation.Action == PlanGateAction.Finalize)
+            {
+                progress($"Plan Gate：Risk={risk}，Version={bump}（使用者已確認定案）");
+                return (plan, risk, bump);
+            }
+
+            if (confirmation.Action == PlanGateAction.HandOff)
+            {
+                progress($"Plan Gate：Risk={risk}，Version={bump}（使用者交給 AI 全權判斷，採用目前計畫）");
+                return (plan, risk, bump);
+            }
+
+            discussion.AppendLine("Plan Gate 提出的定案計畫：");
+            discussion.AppendLine(plan);
+            discussion.AppendLine("使用者補充：");
+            discussion.AppendLine(confirmation.Text ?? string.Empty);
+        }
+    }
+
+    private async Task<int> CreatePullRequestAsync(
+        ProjectEntry project,
+        string taskBranch,
+        string defaultBranch,
+        string title,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        var tempDir = Path.Combine(_runtimeRoot, "temp");
+        Directory.CreateDirectory(tempDir);
+        var bodyFile = Path.Combine(tempDir, "pr-body-" + Guid.NewGuid().ToString("N") + ".md");
+        try
+        {
+            await File.WriteAllTextAsync(bodyFile, body, cancellationToken);
+            var result = await _runner.RunAsync(
+                "gh",
+                new[]
+                {
+                    "pr", "create",
+                    "--repo", project.GitHubRepo,
+                    "--base", defaultBranch,
+                    "--head", taskBranch,
+                    "--title", title,
+                    "--body-file", bodyFile
+                },
+                project.RepoPath,
+                null,
+                TimeSpan.FromMinutes(2),
+                cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException("開啟 PR 失敗：" + FirstUsefulLine(result.StandardError, result.StandardOutput));
+            return ParsePrNumberFromUrl(result.StandardOutput);
+        }
+        finally
+        {
+            try { if (File.Exists(bodyFile)) File.Delete(bodyFile); } catch { }
+        }
+    }
+
+    private async Task<(bool Passed, string Summary)> WaitForPrChecksAsync(
+        ProjectEntry project,
+        int prNumber,
+        CancellationToken cancellationToken)
+    {
+        var result = await _runner.RunAsync(
+            "gh",
+            new[] { "pr", "checks", prNumber.ToString(), "--repo", project.GitHubRepo, "--watch", "--fail-fast" },
+            project.RepoPath,
+            null,
+            TimeSpan.FromMinutes(20),
+            cancellationToken);
+        var summary = string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
+        return (result.ExitCode == 0, summary);
+    }
+
+    private async Task MergePullRequestAsync(
+        ProjectEntry project,
+        int prNumber,
+        string? mergeStrategy,
+        CancellationToken cancellationToken)
+    {
+        var result = await _runner.RunAsync(
+            "gh",
+            new[] { "pr", "merge", prNumber.ToString(), "--repo", project.GitHubRepo, ResolveMergeFlag(mergeStrategy), "--delete-branch" },
+            project.RepoPath,
+            null,
+            TimeSpan.FromMinutes(2),
+            cancellationToken);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException("合併 PR 失敗：" + FirstUsefulLine(result.StandardError, result.StandardOutput));
+    }
+
+    private async Task WaitForManualMergeAsync(ProjectEntry project, int prNumber, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var view = await _runner.RunAsync(
+                "gh",
+                new[] { "pr", "view", prNumber.ToString(), "--repo", project.GitHubRepo, "--json", "state" },
+                project.RepoPath,
+                null,
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+            if (view.ExitCode == 0)
+            {
+                var state = ParsePrState(view.StandardOutput);
+                if (string.Equals(state, "MERGED", StringComparison.OrdinalIgnoreCase)) return;
+                if (string.Equals(state, "CLOSED", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"PR #{prNumber} 已被關閉但未合併，任務中止。");
+            }
+            await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
+        }
     }
 
     private async Task<(string Version, string Tag)> BumpVersionAsync(
@@ -339,11 +648,12 @@ public sealed class ChangeTaskService
     private async Task<string> RunReadOnlyAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken) =>
         await RunProviderAsync(provider, workingDirectory, prompt, false, cancellationToken);
 
-    private async Task RunWriteAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken)
+    private async Task<string> RunWriteAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken)
     {
         var result = await RunProviderAsync(provider, workingDirectory, prompt, true, cancellationToken);
         if (string.IsNullOrWhiteSpace(result))
             throw new InvalidOperationException($"{provider.ToFriendlyName()} 沒有回傳實作結果。");
+        return result;
     }
 
     private async Task<string> RunProviderAsync(
@@ -441,18 +751,37 @@ Request: {request}
 Return concise Traditional Chinese with relevant file paths, symbols, current behavior, likely tests, and risks. Do not design an elaborate evidence pipeline; inspect the repo directly.
 """;
 
-    private static string BuildPlanPrompt(ProjectEntry project, string request, string scout) => $"""
-You are AITeam Plan Gate. Validate the Scout evidence against the repository, then finalize the implementation plan. Do not modify files.
+    private static string BuildPlanPrompt(ProjectEntry project, string request, string scout, string discussion, bool mustFinalize)
+    {
+        var discussionSection = discussion.Length == 0 ? "（尚無先前討論）" : discussion;
+        var decisionInstruction = mustFinalize
+            ? "The user has chosen to hand off the final decision to you. This reply MUST output AITeamPlanStatus: READY with a complete plan — do not ask any more questions."
+            : "If anything about the request is unclear or could materially change the implementation approach, output AITeamPlanStatus: NEEDS_INPUT and ask concrete question(s) instead of guessing — do not provide the full plan yet. Only output AITeamPlanStatus: READY once you are confident the plan is well-defined. There is no limit on how many rounds of questions you may ask.";
+
+        return $"""
+You are AITeam Plan Gate. Validate the Scout evidence against the repository, discuss with the user when needed, then finalize the implementation plan. Do not modify files.
 Project: {project.Name}
 Request: {request}
 Scout report:
 {scout}
 
-Your first two lines MUST be exactly in this format:
+Discussion with the user so far:
+{discussionSection}
+
+{decisionInstruction}
+
+Your first line MUST be exactly one of:
+AITeamPlanStatus: NEEDS_INPUT
+AITeamPlanStatus: READY
+
+If NEEDS_INPUT: after that first line, write your question(s) to the user in Traditional Chinese. Do not include AITeamRisk/AITeamVersionBump lines in this case.
+
+If READY: your next two lines MUST be exactly in this format:
 AITeamRisk: LOW|NORMAL|HIGH
 AITeamVersionBump: PATCH|MINOR|MAJOR|NONE
 Then provide a compact Traditional Chinese plan: files/symbols to change, behavior, acceptance criteria, tests/verification, and important exclusions. Use PATCH for small fixes, MINOR for functional changes, MAJOR only for a major production milestone.
 """;
+    }
 
     private static string BuildImplementPrompt(ProjectEntry project, string request, string scout, string plan) => $"""
 You are AITeam Implementer. Work only inside this isolated Git worktree and implement the approved request. You MAY edit files here.
@@ -511,7 +840,78 @@ Challenge:
 Final review:
 {finalReview}
 
-Make the required edits and run relevant tests. Do not commit, tag, push, merge, or modify anything outside this worktree. Summarize repairs and verification performed.
+Note: the plan and evidence above were produced at the start of this task. The code may have changed since then, from your own earlier implementation or repair rounds. Re-check the actual current file contents before editing — do not blindly trust descriptions written before those changes.
+
+If, after re-checking the actual code, you believe the review's requested change is a false positive (the concern does not really apply, or is already handled), you may dispute it instead of making a speculative edit: make no file changes and start your entire response with exactly this first line:
+AITeamRepairStance: DISPUTE
+Then explain your reasoning in Traditional Chinese for why no change is needed. AITeam will send your reasoning back to the reviewer for a final decision; if they disagree, you will be asked to make the edit next round.
+
+Otherwise, make the required edits and run relevant tests. Do not commit, tag, push, merge, or modify anything outside this worktree. Summarize repairs and verification performed.
+""";
+
+    private static string BuildDisputeReviewPrompt(
+        string request, string plan, string challenge, string finalReview, string disputeReason, string diff, VersionBump plannedBump) => $"""
+You are AITeam Final Reviewer / adjudicator, re-adjudicating your own earlier verdict. Do not modify files.
+Request: {request}
+Plan:
+{plan}
+Independent challenge:
+{challenge}
+Your earlier verdict (requested REPAIR):
+{finalReview}
+The Repair implementer disputes this verdict instead of making changes. Their reasoning:
+{disputeReason}
+Diff (unchanged since your earlier verdict, no edits were made):
+{diff}
+
+Decide again with an open mind: if the implementer's reasoning is correct and there is no real blocking issue, change your verdict to PASS. If the concern still stands, keep REPAIR.
+First line MUST be exactly one of:
+AITeamReview: PASS
+AITeamReview: REPAIR
+Second line MUST be exactly one of:
+AITeamVersionBumpConfirm: PATCH
+AITeamVersionBumpConfirm: MINOR
+AITeamVersionBumpConfirm: MAJOR
+The Plan Gate originally classified the version bump as {plannedBump}.
+Then give your rationale in Traditional Chinese.
+""";
+
+    private static string BuildPrBody(
+        string request, string plan, ChangeRisk risk, bool degradedReview,
+        ProviderId implementer, ProviderId challenger, ProviderId finalReviewer,
+        string newVersion, string tag)
+    {
+        var degradedNote = degradedReview
+            ? "\n\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升一級）。"
+            : "";
+        return $"""
+## AITeam 自動化變更
+
+**需求**：{request}
+
+**版本**：{newVersion}（{tag}）
+**風險等級**：{risk}{degradedNote}
+
+**執行角色**
+- Implementer：{implementer.ToFriendlyName()}
+- Challenger：{challenger.ToFriendlyName()}
+- Final Reviewer：{finalReviewer.ToFriendlyName()}
+
+**計畫摘要**
+
+{plan}
+""";
+    }
+
+    private static string BuildCiRepairPrompt(string request, string plan, string ciSummary) => $"""
+You are AITeam CI-repair implementer. Work only inside this isolated Git worktree. The pull request's CI checks failed; fix the cause without expanding scope unnecessarily.
+Request: {request}
+Approved plan:
+{plan}
+CI check summary:
+{ciSummary}
+
+Re-check the actual current file contents before editing. Make the required edits and run relevant tests/build locally if possible. Do not commit, tag, push, merge, or modify anything outside this worktree; AITeam controller owns Git operations. Summarize the fix and how it addresses the CI failure.
 """;
 
     internal static ChangeRisk ParseRisk(string plan)
@@ -539,6 +939,57 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
         if (review.Contains("AITeamVersionBumpConfirm: MINOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Minor;
         if (review.Contains("AITeamVersionBumpConfirm: PATCH", StringComparison.OrdinalIgnoreCase)) return VersionBump.Patch;
         return VersionBump.None;
+    }
+
+    internal static bool IsPlanGateNeedsInput(string reply) =>
+        reply.TrimStart().StartsWith("AITeamPlanStatus: NEEDS_INPUT", StringComparison.OrdinalIgnoreCase);
+
+    internal static string ExtractPlanGateBody(string reply)
+    {
+        var lines = reply.Trim().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
+        if (lines.Count > 0 && lines[0].StartsWith("AITeamPlanStatus:", StringComparison.OrdinalIgnoreCase))
+            lines.RemoveAt(0);
+        return string.Join(Environment.NewLine, lines).Trim();
+    }
+
+    internal static int ParsePrNumberFromUrl(string output)
+    {
+        var matches = Regex.Matches(output, @"/pull/(\d+)");
+        if (matches.Count == 0)
+            throw new InvalidOperationException("無法從 gh pr create 的輸出解析 PR 編號：" + FirstUsefulLine(output));
+        return int.Parse(matches[^1].Groups[1].Value);
+    }
+
+    internal static string ResolveMergeFlag(string? mergeStrategy) => mergeStrategy?.Trim().ToLowerInvariant() switch
+    {
+        "squash" => "--squash",
+        "rebase" => "--rebase",
+        _ => "--merge"
+    };
+
+    internal static string? ParsePrState(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("state", out var state) ? state.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    internal static string? ParseRepairDispute(string repairResult)
+    {
+        var text = repairResult.TrimStart();
+        if (!text.StartsWith("AITeamRepairStance: DISPUTE", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
+        lines.RemoveAt(0);
+        var reason = string.Join(Environment.NewLine, lines).Trim();
+        return reason.Length == 0 ? "（未提供理由）" : reason;
     }
 
     private static ProviderId Pick(IReadOnlyCollection<ProviderId> available, params ProviderId[] preferences)

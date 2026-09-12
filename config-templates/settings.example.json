@@ -8,6 +8,7 @@
   },
   "workflow": {
     "max_repair_rounds": 3,
+    "max_ci_repair_rounds": 3,
     "auto_sync_main_before_task": true,
     "auto_push_completed_versions": true,
     "keep_successful_task_artifacts": false

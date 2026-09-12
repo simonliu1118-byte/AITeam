@@ -525,6 +525,7 @@ public sealed class MainWindow : Form
                 project,
                 request,
                 candidates,
+                AskPlanGateAsync,
                 text => AppendLog(text),
                 _lifetimeCts.Token);
 
@@ -554,6 +555,34 @@ public sealed class MainWindow : Form
         finally
         {
             if (!IsDisposed) SetTaskRunning(false);
+        }
+    }
+
+    private Task<PlanGateResponse> AskPlanGateAsync(PlanGatePrompt prompt, CancellationToken cancellationToken)
+    {
+        var response = InvokeRequired
+            ? (PlanGateResponse?)Invoke(new Func<PlanGateResponse?>(() => ShowPlanGateDialog(prompt)))
+            : ShowPlanGateDialog(prompt);
+
+        if (response is null)
+            throw new OperationCanceledException("使用者取消了 Plan Gate 討論。", cancellationToken);
+        return Task.FromResult(response);
+    }
+
+    private PlanGateResponse? ShowPlanGateDialog(PlanGatePrompt prompt)
+    {
+        var previousState = _currentTaskState.Text;
+        _currentTaskState.Text = prompt.Stage == PlanGateStage.NeedsInput
+            ? "規劃討論中 · 等待你回覆"
+            : "規劃討論中 · 待你確認定案";
+        try
+        {
+            using var dialog = new PlanGateDialog(prompt);
+            return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Response : null;
+        }
+        finally
+        {
+            _currentTaskState.Text = previousState;
         }
     }
 

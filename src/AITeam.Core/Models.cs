@@ -41,6 +41,9 @@ public sealed class ProjectEntry
     [JsonPropertyName("tag_prefix")]
     public string TagPrefix { get; set; } = "";
 
+    [JsonPropertyName("merge_strategy")]
+    public string MergeStrategy { get; set; } = "merge";
+
     [JsonPropertyName("active")]
     public bool? Active { get; set; } = true;
 

@@ -46,6 +46,90 @@ public sealed class ChangeTaskServiceLogicTests
     {
         Assert.Equal(expected, ChangeTaskService.ReviewPassed(review));
     }
+
+    [Fact]
+    public void ParseRepairDispute_ExtractsReasonWhenRepairerDisputes()
+    {
+        var repairResult = "AITeamRepairStance: DISPUTE\r\n這個發現其實是誤判，因為輸入已經在上一層驗證過。";
+
+        var reason = ChangeTaskService.ParseRepairDispute(repairResult);
+
+        Assert.Equal("這個發現其實是誤判，因為輸入已經在上一層驗證過。", reason);
+    }
+
+    [Fact]
+    public void ParseRepairDispute_FallsBackToPlaceholder_WhenReasonIsEmpty()
+    {
+        var reason = ChangeTaskService.ParseRepairDispute("AITeamRepairStance: DISPUTE");
+
+        Assert.Equal("（未提供理由）", reason);
+    }
+
+    [Fact]
+    public void ParseRepairDispute_ReturnsNull_WhenRepairerMadeNoDispute()
+    {
+        var reason = ChangeTaskService.ParseRepairDispute("已修正相關問題並補上測試。");
+
+        Assert.Null(reason);
+    }
+
+    [Theory]
+    [InlineData("AITeamPlanStatus: NEEDS_INPUT\n這裡有兩種做法，你想要哪一種？", true)]
+    [InlineData("AITeamPlanStatus: READY\nAITeamRisk: NORMAL\nAITeamVersionBump: MINOR\n計畫內容。", false)]
+    [InlineData("沒有任何狀態標記", false)]
+    public void IsPlanGateNeedsInput_ReadsDeclaredStatus(string reply, bool expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.IsPlanGateNeedsInput(reply));
+    }
+
+    [Fact]
+    public void ExtractPlanGateBody_StripsOnlyTheStatusLine()
+    {
+        var reply = "AITeamPlanStatus: READY\r\nAITeamRisk: NORMAL\r\nAITeamVersionBump: MINOR\r\n計畫內容。";
+
+        var body = ChangeTaskService.ExtractPlanGateBody(reply);
+
+        Assert.Equal("AITeamRisk: NORMAL" + Environment.NewLine + "AITeamVersionBump: MINOR" + Environment.NewLine + "計畫內容。", body);
+    }
+
+    [Theory]
+    [InlineData("https://github.com/owner/repo/pull/42\n", 42)]
+    [InlineData("Some warning line\nhttps://github.com/owner/repo/pull/7", 7)]
+    public void ParsePrNumberFromUrl_ExtractsNumberFromGhOutput(string output, int expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.ParsePrNumberFromUrl(output));
+    }
+
+    [Fact]
+    public void ParsePrNumberFromUrl_ThrowsWhenNoPrUrlPresent()
+    {
+        Assert.Throws<InvalidOperationException>(() => ChangeTaskService.ParsePrNumberFromUrl("no url here"));
+    }
+
+    [Theory]
+    [InlineData("squash", "--squash")]
+    [InlineData("SQUASH", "--squash")]
+    [InlineData("rebase", "--rebase")]
+    [InlineData("merge", "--merge")]
+    [InlineData(null, "--merge")]
+    [InlineData("", "--merge")]
+    [InlineData("something-else", "--merge")]
+    public void ResolveMergeFlag_MapsStrategyToGhFlagOrDefaultsToMerge(string? strategy, string expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.ResolveMergeFlag(strategy));
+    }
+
+    [Fact]
+    public void ParsePrState_ReadsStateField()
+    {
+        Assert.Equal("MERGED", ChangeTaskService.ParsePrState("""{ "state": "MERGED" }"""));
+    }
+
+    [Fact]
+    public void ParsePrState_ReturnsNull_WhenJsonInvalid()
+    {
+        Assert.Null(ChangeTaskService.ParsePrState("not json"));
+    }
 }
 
 public sealed class ChangeTaskServiceRoleSelectionTests

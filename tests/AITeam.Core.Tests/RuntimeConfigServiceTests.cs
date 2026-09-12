@@ -42,6 +42,26 @@ public sealed class RuntimeConfigServiceParsingTests
     }
 
     [Fact]
+    public void ParseWorkflowSettings_ReadsMaxCiRepairRounds()
+    {
+        const string json = """{ "workflow": { "max_ci_repair_rounds": 4 } }""";
+
+        var settings = RuntimeConfigService.ParseWorkflowSettings(json);
+
+        Assert.Equal(4, settings.MaxCiRepairRounds);
+    }
+
+    [Fact]
+    public void ParseWorkflowSettings_DefaultsMaxCiRepairRounds_WhenFieldMissing()
+    {
+        const string json = """{ "workflow": { "max_repair_rounds": 5 } }""";
+
+        var settings = RuntimeConfigService.ParseWorkflowSettings(json);
+
+        Assert.Equal(WorkflowSettings.Default.MaxCiRepairRounds, settings.MaxCiRepairRounds);
+    }
+
+    [Fact]
     public void ParseAgentsConfig_ReadsAllCommandOverrides()
     {
         const string json = """
