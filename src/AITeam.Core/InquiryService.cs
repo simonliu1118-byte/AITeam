@@ -28,12 +28,14 @@ public sealed class InquiryService
     private readonly string _runtimeRoot;
     private readonly IProcessRunner _runner;
     private readonly ChangeTaskService _changeTaskService;
+    private readonly AgentsConfig _agents;
 
     public InquiryService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
         _changeTaskService = new ChangeTaskService(runtimeRoot, runner);
+        _agents = new RuntimeConfigService(runtimeRoot).LoadAgentsConfig();
     }
 
     public async Task<InquiryResult> RunAsync(
@@ -169,7 +171,7 @@ public sealed class InquiryService
         try
         {
             var result = await _runner.RunAsync(
-                "codex",
+                _agents.CodexCommand,
                 new[]
                 {
                     "--sandbox", "read-only",
@@ -198,7 +200,7 @@ public sealed class InquiryService
     private async Task<string> RunClaudeAsync(string workingDirectory, string prompt, CancellationToken cancellationToken)
     {
         var result = await _runner.RunAsync(
-            "claude",
+            _agents.ClaudeCommand,
             new[]
             {
                 "-p", prompt,
@@ -226,7 +228,7 @@ public sealed class InquiryService
         }) + Environment.NewLine;
 
         var result = await _runner.RunAsync(
-            "agy",
+            _agents.AntigravityCommand,
             new[]
             {
                 "--dangerously-skip-permissions",
