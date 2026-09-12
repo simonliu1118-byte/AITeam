@@ -14,6 +14,14 @@ public sealed record InquiryResult(
     ProviderId Provider,
     string Answer);
 
+public sealed class ChangePipelineDispatchException : Exception
+{
+    public ChangePipelineDispatchException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 public sealed class InquiryService
 {
     private readonly string _runtimeRoot;
@@ -80,20 +88,31 @@ public sealed class InquiryService
                     if (parsed.Intent == RequestIntent.Change)
                     {
                         progress("已辨識為修改任務，切換到完整多 AI 修改管線…");
-                        var change = await _changeTaskService.RunAsync(
-                            project,
-                            request,
-                            candidates,
-                            progress,
-                            cancellationToken);
+                        try
+                        {
+                            var change = await _changeTaskService.RunAsync(
+                                project,
+                                request,
+                                candidates,
+                                progress,
+                                cancellationToken);
 
-                        var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{FriendlyProvider(change.Implementer)}\r\nFinal Review：{FriendlyProvider(change.FinalReviewer)}";
-                        return new InquiryResult(RequestIntent.Inquiry, change.FinalReviewer, summary);
+                            var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{FriendlyProvider(change.Implementer)}\r\nFinal Review：{FriendlyProvider(change.FinalReviewer)}";
+                            return new InquiryResult(RequestIntent.Inquiry, change.FinalReviewer, summary);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new ChangePipelineDispatchException(ex.Message, ex);
+                        }
                     }
 
                     return parsed;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not ChangePipelineDispatchException)
                 {
                     failures.Add($"{FriendlyProvider(provider)}：{ex.Message}");
                     progress($"{FriendlyProvider(provider)} 本次失敗，嘗試下一個 AI。");
