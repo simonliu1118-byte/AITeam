@@ -14,15 +14,25 @@ public sealed record InquiryResult(
     ProviderId Provider,
     string Answer);
 
+public sealed class ChangePipelineDispatchException : Exception
+{
+    public ChangePipelineDispatchException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 public sealed class InquiryService
 {
     private readonly string _runtimeRoot;
     private readonly ProcessRunner _runner;
+    private readonly ChangeTaskService _changeTaskService;
 
     public InquiryService(string runtimeRoot, ProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
+        _changeTaskService = new ChangeTaskService(runtimeRoot, runner);
     }
 
     public async Task<InquiryResult> RunAsync(
@@ -74,16 +84,42 @@ public sealed class InquiryService
                     if (string.IsNullOrWhiteSpace(answer))
                         throw new InvalidOperationException("AI 沒有回傳可用內容。");
 
-                    return Parse(provider, answer);
+                    var parsed = Parse(provider, answer);
+                    if (parsed.Intent == RequestIntent.Change)
+                    {
+                        progress("已辨識為修改任務，切換到完整多 AI 修改管線…");
+                        try
+                        {
+                            var change = await _changeTaskService.RunAsync(
+                                project,
+                                request,
+                                candidates,
+                                progress,
+                                cancellationToken);
+
+                            var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{FriendlyProvider(change.Implementer)}\r\nFinal Review：{FriendlyProvider(change.FinalReviewer)}";
+                            return new InquiryResult(RequestIntent.Inquiry, change.FinalReviewer, summary);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new ChangePipelineDispatchException(ex.Message, ex);
+                        }
+                    }
+
+                    return parsed;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not ChangePipelineDispatchException)
                 {
                     failures.Add($"{FriendlyProvider(provider)}：{ex.Message}");
                     progress($"{FriendlyProvider(provider)} 本次失敗，嘗試下一個 AI。");
                 }
             }
 
-            throw new InvalidOperationException("所有可用 AI 都無法完成本次查詢。\r\n" + string.Join("\r\n", failures));
+            throw new InvalidOperationException("所有可用 AI 都無法完成本次工作。\r\n" + string.Join("\r\n", failures));
         }
         finally
         {
