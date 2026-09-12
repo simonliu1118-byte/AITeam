@@ -81,7 +81,18 @@ public static class CliExecutableResolver
     }
 }
 
-public sealed class ProcessRunner
+public interface IProcessRunner
+{
+    Task<ProcessRunResult> RunAsync(
+        string fileName,
+        IEnumerable<string> arguments,
+        string workingDirectory,
+        string? standardInput,
+        TimeSpan timeout,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ProcessRunner : IProcessRunner
 {
     public async Task<ProcessRunResult> RunAsync(
         string fileName,
