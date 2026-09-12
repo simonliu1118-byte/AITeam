@@ -7,11 +7,13 @@ public sealed class ProviderHealthService
 {
     private readonly string _runtimeRoot;
     private readonly IProcessRunner _runner;
+    private readonly AgentsConfig _agents;
 
     public ProviderHealthService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
+        _agents = new RuntimeConfigService(runtimeRoot).LoadAgentsConfig();
     }
 
     public Task<ProviderHealth> ProbeAsync(ProviderId provider, CancellationToken cancellationToken) =>
@@ -40,7 +42,7 @@ public sealed class ProviderHealthService
 
         return await RunAndClassifyAsync(
             ProviderId.Codex,
-            "codex",
+            _agents.CodexCommand,
             args,
             prompt,
             TimeSpan.FromSeconds(60),
@@ -79,7 +81,7 @@ public sealed class ProviderHealthService
 
         return await RunAndClassifyAsync(
             ProviderId.Claude,
-            "claude",
+            _agents.ClaudeCommand,
             args,
             null,
             TimeSpan.FromSeconds(60),
@@ -108,7 +110,7 @@ public sealed class ProviderHealthService
 
         return await RunAndClassifyAsync(
             ProviderId.Antigravity,
-            "agy",
+            _agents.AntigravityCommand,
             args,
             payload,
             TimeSpan.FromSeconds(90),
