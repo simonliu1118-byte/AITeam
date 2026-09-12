@@ -1,3 +1,4 @@
+using AITeam.Models;
 using AITeam.Services;
 using Xunit;
 
@@ -34,5 +35,59 @@ public sealed class ChangeTaskServiceLogicTests
     public void ReviewPassed_RequiresPassWithoutAnyRepairMention(string review, bool expected)
     {
         Assert.Equal(expected, ChangeTaskService.ReviewPassed(review));
+    }
+}
+
+public sealed class ChangeTaskServiceRoleSelectionTests
+{
+    private static readonly ProviderId[] FinalReviewerPreferences =
+        { ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude };
+
+    [Theory]
+    [InlineData(ProviderId.Codex, ProviderId.Claude)]
+    [InlineData(ProviderId.Codex, ProviderId.Antigravity)]
+    [InlineData(ProviderId.Claude, ProviderId.Antigravity)]
+    public void TryPickDifferentFromAny_FailsWhenOnlyOneNonExcludedProviderExists(
+        ProviderId implementer, ProviderId challenger)
+    {
+        var available = new[] { implementer, challenger };
+
+        var found = ChangeTaskService.TryPickDifferentFromAny(
+            available,
+            new[] { implementer, challenger },
+            FinalReviewerPreferences,
+            out _);
+
+        Assert.False(found);
+    }
+
+    [Fact]
+    public void TryPickDifferentFromAny_FindsThirdProvider_WhenAllThreeOnline()
+    {
+        var available = new[] { ProviderId.Codex, ProviderId.Claude, ProviderId.Antigravity };
+
+        var found = ChangeTaskService.TryPickDifferentFromAny(
+            available,
+            new[] { ProviderId.Claude, ProviderId.Antigravity },
+            FinalReviewerPreferences,
+            out var result);
+
+        Assert.True(found);
+        Assert.Equal(ProviderId.Codex, result);
+    }
+
+    [Fact]
+    public void TryPickDifferentFromAny_RespectsPreferenceOrder()
+    {
+        var available = new[] { ProviderId.Codex, ProviderId.Claude, ProviderId.Antigravity };
+
+        var found = ChangeTaskService.TryPickDifferentFromAny(
+            available,
+            Array.Empty<ProviderId>(),
+            FinalReviewerPreferences,
+            out var result);
+
+        Assert.True(found);
+        Assert.Equal(ProviderId.Codex, result);
     }
 }
