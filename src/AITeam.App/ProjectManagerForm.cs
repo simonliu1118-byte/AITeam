@@ -205,11 +205,12 @@ public sealed class ProjectManagerForm : Form
         var repoRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 5, 0, 0) };
         repoRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         repoRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _repoBox.Font = Font;
         _repoBox.Dock = DockStyle.Fill;
         _repoBox.DropDownStyle = ComboBoxStyle.DropDown;
         _repoBox.Margin = new Padding(0, 0, 10, 0);
         ConfigureSecondaryButton(_loadButton, "載入 Repo", 104);
-        _loadButton.Height = _repoBox.PreferredHeight;
+        _loadButton.Height = _repoBox.PreferredHeight + 2;
         _loadButton.Click += async (_, _) => await LoadRepoAsync();
         repoRow.Controls.Add(_repoBox, 0, 0);
         repoRow.Controls.Add(_loadButton, 1, 0);
@@ -457,6 +458,7 @@ public sealed class ProjectManagerForm : Form
                 TagPrefix = string.IsNullOrWhiteSpace(_editing?.TagPrefix)
                     ? new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v"
                     : _editing!.TagPrefix,
+                MergeStrategy = string.IsNullOrWhiteSpace(_editing?.MergeStrategy) ? "merge" : _editing.MergeStrategy,
                 Active = true,
                 Extra = _editing?.Extra
             };

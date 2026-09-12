@@ -76,20 +76,23 @@ public sealed class MainWindow : Form
         var body = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             BackColor = AppBackground,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 16F));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56F));
         shell.Controls.Add(body, 0, 1);
 
         var left = new Panel { Dock = DockStyle.Fill, BackColor = AppBackground };
+        var gutter = new Panel { Dock = DockStyle.Fill, BackColor = AppBackground };
         var right = new Panel { Dock = DockStyle.Fill, BackColor = AppBackground };
         body.Controls.Add(left, 0, 0);
-        body.Controls.Add(right, 1, 0);
+        body.Controls.Add(gutter, 1, 0);
+        body.Controls.Add(right, 2, 0);
         BuildLeftPanel(left);
         BuildRightPanel(right);
     }
@@ -247,16 +250,18 @@ public sealed class MainWindow : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
+        _projectBox.Font = Font;
         _projectBox.Dock = DockStyle.Fill;
         _projectBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _projectBox.Margin = new Padding(0, 0, 10, 0);
         _projectBox.SelectedIndexChanged += (_, _) => UpdateProjectInfo();
 
+        var projectButtonHeight = _projectBox.PreferredHeight + 2;
         _projectButton.Text = "管理專案";
         _projectButton.AutoSize = false;
-        _projectButton.Size = new Size(104, _projectBox.PreferredHeight);
-        _projectButton.MinimumSize = new Size(104, _projectBox.PreferredHeight);
-        _projectButton.MaximumSize = new Size(104, _projectBox.PreferredHeight);
+        _projectButton.Size = new Size(104, projectButtonHeight);
+        _projectButton.MinimumSize = new Size(104, projectButtonHeight);
+        _projectButton.MaximumSize = new Size(104, projectButtonHeight);
         _projectButton.FlatStyle = FlatStyle.Flat;
         _projectButton.BackColor = Color.White;
         _projectButton.ForeColor = PrimaryText;
@@ -406,6 +411,7 @@ public sealed class MainWindow : Form
         _outputBox.BackColor = CardBackground;
         _outputBox.ForeColor = Color.FromArgb(55, 62, 70);
         _outputBox.Font = new Font("Consolas", 9.5F);
+        _outputBox.DetectUrls = false;
         logCard.Controls.Add(_outputBox);
         layout.Controls.Add(logCard, 0, 3);
     }
@@ -642,6 +648,9 @@ public sealed class MainWindow : Form
             BeginInvoke(new Action<string>(AppendLog), text);
             return;
         }
+        _outputBox.SelectionStart = _outputBox.TextLength;
+        _outputBox.SelectionLength = 0;
+        _outputBox.SelectionFont = _outputBox.Font;
         if (text.Length == 0)
             _outputBox.AppendText(Environment.NewLine);
         else
