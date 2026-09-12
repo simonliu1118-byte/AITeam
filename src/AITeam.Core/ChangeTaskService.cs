@@ -30,10 +30,10 @@ public sealed record ChangeTaskResult(
 public sealed class ChangeTaskService
 {
     private readonly string _runtimeRoot;
-    private readonly ProcessRunner _runner;
+    private readonly IProcessRunner _runner;
     private readonly GitRepositoryService _git;
 
-    public ChangeTaskService(string runtimeRoot, ProcessRunner runner)
+    public ChangeTaskService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
@@ -477,14 +477,14 @@ Final review:
 Make the required edits and run relevant tests. Do not commit, tag, push, merge, or modify anything outside this worktree. Summarize repairs and verification performed.
 """;
 
-    private static ChangeRisk ParseRisk(string plan)
+    internal static ChangeRisk ParseRisk(string plan)
     {
         if (plan.Contains("AITeamRisk: HIGH", StringComparison.OrdinalIgnoreCase)) return ChangeRisk.High;
         if (plan.Contains("AITeamRisk: LOW", StringComparison.OrdinalIgnoreCase)) return ChangeRisk.Low;
         return ChangeRisk.Normal;
     }
 
-    private static VersionBump ParseVersionBump(string plan)
+    internal static VersionBump ParseVersionBump(string plan)
     {
         if (plan.Contains("AITeamVersionBump: MAJOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Major;
         if (plan.Contains("AITeamVersionBump: MINOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Minor;
@@ -492,7 +492,7 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
         return VersionBump.None;
     }
 
-    private static bool ReviewPassed(string review) =>
+    internal static bool ReviewPassed(string review) =>
         review.Contains("AITeamReview: PASS", StringComparison.OrdinalIgnoreCase) &&
         !review.Contains("AITeamReview: REPAIR", StringComparison.OrdinalIgnoreCase);
 

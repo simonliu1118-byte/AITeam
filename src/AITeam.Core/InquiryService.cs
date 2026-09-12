@@ -26,10 +26,10 @@ public sealed class ChangePipelineDispatchException : Exception
 public sealed class InquiryService
 {
     private readonly string _runtimeRoot;
-    private readonly ProcessRunner _runner;
+    private readonly IProcessRunner _runner;
     private readonly ChangeTaskService _changeTaskService;
 
-    public InquiryService(string runtimeRoot, ProcessRunner runner)
+    public InquiryService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
@@ -261,7 +261,7 @@ User request:
 {request}
 """;
 
-    private static InquiryResult Parse(ProviderId provider, string raw)
+    internal static InquiryResult Parse(ProviderId provider, string raw)
     {
         var text = raw.Trim();
         var intent = text.Contains("AITeamIntent: CHANGE", StringComparison.OrdinalIgnoreCase)

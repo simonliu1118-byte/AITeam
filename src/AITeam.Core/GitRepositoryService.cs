@@ -13,9 +13,9 @@ public sealed class GitRepositoryService
 {
     private static readonly Regex RepoPattern = new("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", RegexOptions.Compiled);
     private readonly string _runtimeRoot;
-    private readonly ProcessRunner _runner;
+    private readonly IProcessRunner _runner;
 
-    public GitRepositoryService(string runtimeRoot, ProcessRunner runner)
+    public GitRepositoryService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
@@ -131,7 +131,7 @@ public sealed class GitRepositoryService
         return destination;
     }
 
-    private async Task<string> GetRemoteDefaultBranchAsync(string repoPath, string? preferredBranch, CancellationToken cancellationToken)
+    internal async Task<string> GetRemoteDefaultBranchAsync(string repoPath, string? preferredBranch, CancellationToken cancellationToken)
     {
         var head = await RunGitAsync(repoPath, new[] { "symbolic-ref", "--short", "refs/remotes/origin/HEAD" }, cancellationToken);
         if (head.ExitCode == 0 && !string.IsNullOrWhiteSpace(head.StandardOutput))
@@ -167,7 +167,7 @@ public sealed class GitRepositoryService
         return result;
     }
 
-    private static string NormalizeGitHubRepo(string input)
+    internal static string NormalizeGitHubRepo(string input)
     {
         var repo = input.Trim();
         if (!RepoPattern.IsMatch(repo))
@@ -177,7 +177,7 @@ public sealed class GitRepositoryService
         return repo;
     }
 
-    private static bool RemoteMatches(string remote, string githubRepo)
+    internal static bool RemoteMatches(string remote, string githubRepo)
     {
         if (string.IsNullOrWhiteSpace(remote)) return false;
         var normalized = remote.Trim().Replace('\\', '/');
