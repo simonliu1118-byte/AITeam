@@ -8,9 +8,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AITeam</AssemblyName>
     <RootNamespace>AITeam</RootNamespace>
-    <Version>0.5.1</Version>
-    <FileVersion>0.5.1.0</FileVersion>
-    <AssemblyVersion>0.5.1.0</AssemblyVersion>
+    <Version>0.6.0</Version>
+    <FileVersion>0.6.0.0</FileVersion>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>AITeam.ico</ApplicationIcon>
@@ -25,5 +25,9 @@
     <DebugSymbols>false</DebugSymbols>
     <SatelliteResourceLanguages>zh-Hant</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AITeam.Core\AITeam.Core.csproj" />
+  </ItemGroup>
 
 </Project>
