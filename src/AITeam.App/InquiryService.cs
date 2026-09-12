@@ -18,11 +18,13 @@ public sealed class InquiryService
 {
     private readonly string _runtimeRoot;
     private readonly ProcessRunner _runner;
+    private readonly ChangeTaskService _changeTaskService;
 
     public InquiryService(string runtimeRoot, ProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
+        _changeTaskService = new ChangeTaskService(runtimeRoot, runner);
     }
 
     public async Task<InquiryResult> RunAsync(
@@ -74,7 +76,22 @@ public sealed class InquiryService
                     if (string.IsNullOrWhiteSpace(answer))
                         throw new InvalidOperationException("AI 沒有回傳可用內容。");
 
-                    return Parse(provider, answer);
+                    var parsed = Parse(provider, answer);
+                    if (parsed.Intent == RequestIntent.Change)
+                    {
+                        progress("已辨識為修改任務，切換到完整多 AI 修改管線…");
+                        var change = await _changeTaskService.RunAsync(
+                            project,
+                            request,
+                            candidates,
+                            progress,
+                            cancellationToken);
+
+                        var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{FriendlyProvider(change.Implementer)}\r\nFinal Review：{FriendlyProvider(change.FinalReviewer)}";
+                        return new InquiryResult(RequestIntent.Inquiry, change.FinalReviewer, summary);
+                    }
+
+                    return parsed;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -83,7 +100,7 @@ public sealed class InquiryService
                 }
             }
 
-            throw new InvalidOperationException("所有可用 AI 都無法完成本次查詢。\r\n" + string.Join("\r\n", failures));
+            throw new InvalidOperationException("所有可用 AI 都無法完成本次工作。\r\n" + string.Join("\r\n", failures));
         }
         finally
         {
