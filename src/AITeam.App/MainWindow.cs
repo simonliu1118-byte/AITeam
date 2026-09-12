@@ -528,19 +528,17 @@ public sealed class MainWindow : Form
                 text => AppendLog(text),
                 _lifetimeCts.Token);
 
-            if (result.Intent == RequestIntent.Inquiry)
+            if (result.Intent == RequestIntent.Change && result.Change is { } change)
             {
-                _currentTaskState.Text = $"查詢完成 · {FriendlyProvider(result.Provider)}";
+                _currentTaskState.Text = $"修改完成 · {change.Version}（{change.Tag}）";
                 AppendLog("");
                 AppendLog(result.Answer);
             }
             else
             {
-                _currentTaskState.Text = "已辨識為修改任務";
+                _currentTaskState.Text = $"查詢完成 · {FriendlyProvider(result.Provider)}";
                 AppendLog("");
                 AppendLog(result.Answer);
-                AppendLog("");
-                AppendLog("v0.4.0 已能真實判斷查詢/修改需求；完整三 AI 修改管線尚未接入，因此本次沒有修改 project source。");
             }
         }
         catch (OperationCanceledException)

@@ -26,7 +26,7 @@ public sealed class GitRepositoryService
         var repo = NormalizeGitHubRepo(githubRepo);
         var repoPath = await EnsureLocalRepoAsync(repo, cancellationToken);
         await RunGitCheckedAsync(repoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
-        var branch = await GetRemoteDefaultBranchAsync(repoPath, cancellationToken);
+        var branch = await GetRemoteDefaultBranchAsync(repoPath, null, cancellationToken);
         var result = await RunGitCheckedAsync(repoPath, new[] { "ls-tree", "-d", "-r", "--name-only", $"origin/{branch}" }, cancellationToken);
 
         var directories = result.StandardOutput
@@ -41,10 +41,10 @@ public sealed class GitRepositoryService
         return new RepoTreeSnapshot(repo, repoPath, branch, directories);
     }
 
-    public async Task<string> SafeSyncAsync(string repoPath, CancellationToken cancellationToken)
+    public async Task<string> SafeSyncAsync(string repoPath, string? preferredBranch, CancellationToken cancellationToken)
     {
         await RunGitCheckedAsync(repoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
-        var branch = await GetRemoteDefaultBranchAsync(repoPath, cancellationToken);
+        var branch = await GetRemoteDefaultBranchAsync(repoPath, preferredBranch, cancellationToken);
         var remoteRef = $"origin/{branch}";
 
         var dirty = await RunGitCheckedAsync(repoPath, new[] { "status", "--porcelain" }, cancellationToken);
@@ -131,12 +131,18 @@ public sealed class GitRepositoryService
         return destination;
     }
 
-    private async Task<string> GetRemoteDefaultBranchAsync(string repoPath, CancellationToken cancellationToken)
+    private async Task<string> GetRemoteDefaultBranchAsync(string repoPath, string? preferredBranch, CancellationToken cancellationToken)
     {
         var head = await RunGitAsync(repoPath, new[] { "symbolic-ref", "--short", "refs/remotes/origin/HEAD" }, cancellationToken);
         if (head.ExitCode == 0 && !string.IsNullOrWhiteSpace(head.StandardOutput))
         {
             return head.StandardOutput.Trim().Replace("origin/", "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(preferredBranch))
+        {
+            var preferredCheck = await RunGitAsync(repoPath, new[] { "rev-parse", "--verify", $"refs/remotes/origin/{preferredBranch}" }, cancellationToken);
+            if (preferredCheck.ExitCode == 0) return preferredBranch;
         }
 
         foreach (var candidate in new[] { "main", "master" })

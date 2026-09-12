@@ -54,7 +54,7 @@ public sealed class ChangeTaskService
             throw new DirectoryNotFoundException($"找不到專案 Repo：{project.RepoPath}");
 
         progress("同步 GitHub 預設分支並確認本機 Repo 安全狀態…");
-        var defaultBranch = await _git.SafeSyncAsync(project.RepoPath, cancellationToken);
+        var defaultBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
         var baseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
 
         var taskId = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6];
@@ -209,7 +209,7 @@ public sealed class ChangeTaskService
 
             formalized = true;
             progress("GitHub 正式版本已完成。同步本機預設分支…");
-            await _git.SafeSyncAsync(project.RepoPath, cancellationToken);
+            await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
             return new ChangeTaskResult(
                 implementer,
@@ -246,9 +246,9 @@ public sealed class ChangeTaskService
     private async Task VerifyWorkingTreeAsync(string worktreeRoot, Action<string> progress, CancellationToken cancellationToken)
     {
         progress("Verification：檢查 Git diff / whitespace / 工作區狀態…");
-        var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "--check" }, cancellationToken);
+        var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--check" }, cancellationToken);
         if (diffCheck.ExitCode != 0)
-            throw new InvalidOperationException("Verification 失敗（git diff --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
+            throw new InvalidOperationException("Verification 失敗（git diff HEAD --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
 
         var status = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
         if (string.IsNullOrWhiteSpace(status.StandardOutput))

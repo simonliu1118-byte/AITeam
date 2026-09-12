@@ -12,7 +12,8 @@ public enum RequestIntent
 public sealed record InquiryResult(
     RequestIntent Intent,
     ProviderId Provider,
-    string Answer);
+    string Answer,
+    ChangeTaskResult? Change = null);
 
 public sealed class ChangePipelineDispatchException : Exception
 {
@@ -98,7 +99,7 @@ public sealed class InquiryService
                                 cancellationToken);
 
                             var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{FriendlyProvider(change.Implementer)}\r\nFinal Review：{FriendlyProvider(change.FinalReviewer)}";
-                            return new InquiryResult(RequestIntent.Inquiry, change.FinalReviewer, summary);
+                            return new InquiryResult(RequestIntent.Change, change.FinalReviewer, summary, change);
                         }
                         catch (OperationCanceledException)
                         {
