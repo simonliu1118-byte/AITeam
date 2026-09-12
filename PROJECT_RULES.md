@@ -64,6 +64,7 @@ Confirmed change 預設 pipeline：
 - Inquiry 不執行上述寫入動作。
 - Change task 的 commit、merge、tag、push 必須同時符合本文件與目標 repository 規則；目標 repo 若要求 PR、人工 Release、Build 身分確認或禁止自動 tag，AITeam 必須遵守。
 - 不得把 AITeam 內部 pipeline 的方便性當成越權理由。
+- **Change task 完成合併後，AITeam 不自動建立 git tag，也不自動建立／發布 GitHub Release。** 版本檔（VERSION／BUILD）照常在合併前更新，但「正式版」這個身分（tag + Release）一律等使用者另外明確觸發才建立，不論目標專案是 AITeam 自己還是其他 managed repository。
 - GitHub Release publishing 與 deployment 預設不是一般 change task 的自動步驟；只有目標 repo 規則或使用者明確授權時才執行。
 
 ## 8. 驗證與失敗處理

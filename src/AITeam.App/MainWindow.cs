@@ -537,7 +537,7 @@ public sealed class MainWindow : Form
 
             if (result.Intent == RequestIntent.Change && result.Change is { } change)
             {
-                _currentTaskState.Text = $"修改完成 · {change.Version}（{change.Tag}）";
+                _currentTaskState.Text = $"修改完成 · {change.Version}";
                 AppendLog("");
                 AppendLog(result.Answer);
             }

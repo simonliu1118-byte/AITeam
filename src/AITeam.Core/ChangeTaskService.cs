@@ -42,7 +42,6 @@ public sealed record ChangeTaskResult(
     ProviderId FinalReviewer,
     ChangeRisk Risk,
     string Version,
-    string Tag,
     string Summary,
     bool DegradedReview = false);
 
@@ -267,7 +266,7 @@ public sealed class ChangeTaskService
             }
 
             var (newVersion, tag) = await BumpVersionAsync(project, workingDirectory, bump, cancellationToken);
-            progress($"版本：{newVersion}；Tag：{tag}");
+            progress($"版本：{newVersion}（未來正式發布時建議的 tag：{tag}，本次不會自動建立）");
 
             await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
             await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
@@ -360,30 +359,11 @@ public sealed class ChangeTaskService
                 progress("PR 已自動合併。");
             }
 
-            progress("合併完成；重新同步並打 tag…");
-            await RunGitCheckedAsync(project.RepoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
-            var mergeSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", $"origin/{defaultBranch}" }, cancellationToken)).StandardOutput.Trim();
-
-            var tagExists = await RunGitAsync(project.RepoPath, new[] { "rev-parse", "-q", "--verify", $"refs/tags/{tag}" }, cancellationToken);
-            if (tagExists.ExitCode == 0)
-                throw new InvalidOperationException($"Tag {tag} 已存在，為避免覆蓋既有版本，本次停止打 tag（PR 已合併，僅 tag 未完成）。");
-
-            await RunGitCheckedAsync(project.RepoPath, new[] { "tag", "-a", tag, mergeSha, "-m", $"{project.Name} {newVersion}" }, cancellationToken);
-            var pushTag = await _runner.RunAsync(
-                "git",
-                new[] { "push", "origin", $"refs/tags/{tag}:refs/tags/{tag}" },
-                project.RepoPath,
-                null,
-                TimeSpan.FromMinutes(2),
-                cancellationToken);
-            if (pushTag.ExitCode != 0)
-                throw new InvalidOperationException("Tag 推送失敗（PR 已合併，僅 tag 未完成）：" + FirstUsefulLine(pushTag.StandardError, pushTag.StandardOutput));
-
             formalized = true;
-            progress("GitHub 正式版本已完成。同步本機預設分支…");
+            progress("合併完成。同步本機預設分支…");
             await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
-            var summary = $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}），PR：{prUrl}";
+            var summary = $"修改已完成並合併：{project.Name} {newVersion}，PR：{prUrl}\r\n（版號已更新，但不會自動建立正式 tag／Release；需要正式發布時再另外觸發。）";
             if (degradedReview)
                 summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升）。";
 
@@ -392,7 +372,6 @@ public sealed class ChangeTaskService
                 lastFinalReviewer,
                 risk,
                 newVersion,
-                tag,
                 summary,
                 degradedReview);
         }
@@ -944,7 +923,7 @@ Then give your rationale in Traditional Chinese.
 
 **需求**：{request}
 
-**版本**：{newVersion}（{tag}）
+**版本**：{newVersion}（未來正式發布時建議的 tag：{tag}；本次合併不會自動建立 tag／Release）
 **風險等級**：{risk}{degradedNote}
 
 **執行角色**
