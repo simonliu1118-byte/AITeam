@@ -10,6 +10,9 @@ public sealed class ProjectManagerForm : Form
     private static readonly Color PrimaryText = Color.FromArgb(34, 40, 49);
     private static readonly Color SecondaryText = Color.FromArgb(104, 113, 123);
     private static readonly Color Accent = Color.FromArgb(43, 108, 176);
+    private static readonly Color Danger = Color.FromArgb(176, 54, 54);
+    private static readonly Color DangerBorder = Color.FromArgb(227, 195, 195);
+    private static readonly Color MetaBackground = Color.FromArgb(247, 249, 251);
 
     private readonly ProjectRegistryService _registry;
     private readonly KnownRepositoryService _knownRepos;
@@ -22,6 +25,9 @@ public sealed class ProjectManagerForm : Form
     private readonly Label _repoInfo = new();
     private readonly TreeView _tree = new();
     private readonly Label _selectedLabel = new();
+    private readonly TextBox _versionFileBox = new();
+    private readonly TextBox _tagPrefixBox = new();
+    private readonly ComboBox _mergeStrategyBox = new();
     private readonly Button _loadButton = new();
     private readonly Button _saveButton = new();
     private readonly Button _removeButton = new();
@@ -43,8 +49,8 @@ public sealed class ProjectManagerForm : Form
 
         Text = "AITeam - 專案管理";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(900, 650);
-        Size = new Size(980, 720);
+        MinimumSize = new Size(940, 680);
+        Size = new Size(1020, 760);
         Font = new Font("Microsoft JhengHei UI", 10F);
         BackColor = AppBackground;
         Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -62,12 +68,11 @@ public sealed class ProjectManagerForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(20),
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             BackColor = AppBackground
         };
         shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(shell);
 
         var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
@@ -82,7 +87,7 @@ public sealed class ProjectManagerForm : Form
             Margin = new Padding(0, 0, 0, 14)
         }, 0, 0);
 
-        ConfigureSecondaryButton(_newButton, "新增專案", 100);
+        ConfigurePrimaryButton(_newButton, "＋ 新增專案", 120);
         _newButton.Click += (_, _) => StartNewProject();
         header.Controls.Add(_newButton, 1, 0);
         shell.Controls.Add(header, 0, 0);
@@ -101,80 +106,65 @@ public sealed class ProjectManagerForm : Form
 
         content.Controls.Add(BuildProjectListPanel(), 0, 0);
         content.Controls.Add(BuildEditorPanel(), 1, 0);
-
-        var bottom = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 3,
-            Margin = new Padding(0, 14, 0, 0)
-        };
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        _removeButton.Text = "移除登錄";
-        ConfigureSecondaryButton(_removeButton, "移除登錄", 100);
-        _removeButton.ForeColor = Color.FromArgb(176, 54, 54);
-        _removeButton.Click += (_, _) => RemoveRegistration();
-        bottom.Controls.Add(_removeButton, 0, 0);
-
-        var close = MakeSecondaryButton("完成", 90);
-        close.Margin = new Padding(8, 0, 0, 0);
-        close.Click += (_, _) =>
-        {
-            DialogResult = _changed ? DialogResult.OK : DialogResult.Cancel;
-            Close();
-        };
-        bottom.Controls.Add(close, 1, 0);
-
-        _saveButton.Text = "儲存";
-        _saveButton.Size = new Size(100, 38);
-        _saveButton.Margin = new Padding(8, 0, 0, 0);
-        _saveButton.FlatStyle = FlatStyle.Flat;
-        _saveButton.FlatAppearance.BorderSize = 0;
-        _saveButton.BackColor = Accent;
-        _saveButton.ForeColor = Color.White;
-        _saveButton.Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold);
-        _saveButton.Click += async (_, _) => await SaveAsync();
-        bottom.Controls.Add(_saveButton, 2, 0);
-        shell.Controls.Add(bottom, 0, 2);
     }
 
     private Control BuildProjectListPanel()
     {
+        var card = new RoundedCard
+        {
+            Dock = DockStyle.Fill,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(14, 12, 14, 12),
+            Margin = new Padding(0, 0, 14, 0)
+        };
+
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 3,
-            Margin = new Padding(0, 0, 14, 0),
-            Padding = new Padding(0),
-            BackColor = AppBackground
+            BackColor = Color.White
         };
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        panel.Controls.Add(MakeFieldLabel("已登錄專案"), 0, 0);
+        panel.Controls.Add(new Label
+        {
+            Text = "已登錄專案",
+            AutoSize = true,
+            ForeColor = SecondaryText,
+            Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold),
+            Margin = new Padding(2, 0, 0, 8)
+        }, 0, 0);
+
         _projectList.Dock = DockStyle.Fill;
-        _projectList.BorderStyle = BorderStyle.FixedSingle;
+        _projectList.BorderStyle = BorderStyle.None;
         _projectList.IntegralHeight = false;
-        _projectList.Margin = new Padding(0, 6, 0, 6);
+        _projectList.Margin = new Padding(0, 0, 0, 8);
         _projectList.SelectedIndexChanged += (_, _) =>
         {
             if (_suppressSelection) return;
             if (_projectList.SelectedItem is ProjectEntry entry) LoadProject(entry);
         };
         panel.Controls.Add(_projectList, 0, 1);
-        panel.Controls.Add(new Label
+
+        var foot = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
+        var divider = new Panel { Height = 1, Dock = DockStyle.Top, BackColor = Color.FromArgb(238, 241, 244), Margin = new Padding(0, 8, 0, 8) };
+        foot.Controls.Add(divider, 0, 0);
+        foot.Controls.Add(new Label
         {
             Text = "新增專案不會覆蓋既有專案；選取清單項目後才會進入編輯模式。",
             AutoSize = true,
-            MaximumSize = new Size(215, 0),
+            MaximumSize = new Size(195, 0),
+            Font = new Font("Microsoft JhengHei UI", 8.5F),
             ForeColor = SecondaryText
-        }, 0, 2);
-        return panel;
+        }, 0, 1);
+        panel.Controls.Add(foot, 0, 2);
+
+        card.Controls.Add(panel);
+        return card;
     }
 
     private Control BuildEditorPanel()
@@ -184,23 +174,43 @@ public sealed class ProjectManagerForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(4, 0, 0, 0),
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 4,
             BackColor = AppBackground
         };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        root.Controls.Add(MakeFieldLabel("專案名稱"), 0, 0);
-        _nameBox.Dock = DockStyle.Top;
-        _nameBox.Margin = new Padding(0, 5, 0, 12);
-        root.Controls.Add(_nameBox, 0, 1);
+        root.Controls.Add(BuildBasicInfoSection(), 0, 0);
+        root.Controls.Add(BuildRepoSection(), 0, 1);
+        root.Controls.Add(BuildLocationSection(), 0, 2);
 
-        root.Controls.Add(MakeFieldLabel("GitHub Repo（可選已知 Repo，或直接輸入 owner/repo）"), 0, 2);
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 12, 0, 0) };
+        bottom.Controls.Add(BuildAdvancedSection(), 0, 0);
+        bottom.Controls.Add(BuildFooter(), 0, 1);
+        root.Controls.Add(bottom, 0, 3);
+
+        return root;
+    }
+
+    private Control BuildBasicInfoSection()
+    {
+        var card = MakeSectionCard(out var body, extraRows: 1);
+        body.Controls.Add(SectionHeader(1, "基本資訊"), 0, 0);
+        body.Controls.Add(MakeFieldLabel("專案名稱"), 0, 1);
+        _nameBox.Dock = DockStyle.Top;
+        _nameBox.Margin = new Padding(0, 5, 0, 0);
+        body.Controls.Add(_nameBox, 0, 2);
+        return card;
+    }
+
+    private Control BuildRepoSection()
+    {
+        var card = MakeSectionCard(out var body, extraRows: 2);
+        card.Margin = new Padding(0, 12, 2, 0);
+        body.Controls.Add(SectionHeader(2, "GitHub Repo"), 0, 0);
+        body.Controls.Add(MakeFieldLabel("可選已知 Repo，或直接輸入 owner/repo"), 0, 1);
 
         var repoRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 5, 0, 0) };
         repoRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -214,47 +224,218 @@ public sealed class ProjectManagerForm : Form
         _loadButton.Click += async (_, _) => await LoadRepoAsync();
         repoRow.Controls.Add(_repoBox, 0, 0);
         repoRow.Controls.Add(_loadButton, 1, 0);
-        root.Controls.Add(repoRow, 0, 3);
+        body.Controls.Add(repoRow, 0, 2);
 
+        var metaPanel = new Panel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            BackColor = MetaBackground,
+            Padding = new Padding(11, 8, 11, 8),
+            Margin = new Padding(0, 10, 0, 0)
+        };
         _repoInfo.AutoSize = true;
         _repoInfo.ForeColor = SecondaryText;
-        _repoInfo.Margin = new Padding(0, 9, 0, 9);
-        root.Controls.Add(_repoInfo, 0, 4);
+        _repoInfo.Font = new Font("Microsoft JhengHei UI", 8.5F);
+        metaPanel.Controls.Add(_repoInfo);
+        body.Controls.Add(metaPanel, 0, 3);
 
-        var treeWrap = new TableLayoutPanel
+        return card;
+    }
+
+    private Control BuildLocationSection()
+    {
+        var card = MakeSectionCard(out var body, extraRows: 2);
+        card.Dock = DockStyle.Fill;
+        card.Margin = new Padding(0, 12, 2, 0);
+        body.RowStyles[body.RowCount - 1] = new RowStyle(SizeType.Percent, 100F);
+
+        body.Controls.Add(SectionHeader(3, "專案在 Repo 內的位置"), 0, 0);
+        body.Controls.Add(new Label
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = Padding.Empty
-        };
-        treeWrap.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        treeWrap.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        treeWrap.Controls.Add(new Label
-        {
-            Text = "Repo 內的專案位置（若整個 Repo 就是一個專案，選「Repo 根目錄」）",
+            Text = "整個 Repo 就是一個專案時，選「Repo 根目錄」。",
             AutoSize = true,
-            ForeColor = PrimaryText,
-            Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 6)
-        }, 0, 0);
+            ForeColor = SecondaryText,
+            Font = new Font("Microsoft JhengHei UI", 8.5F),
+            Margin = new Padding(0, 0, 0, 8)
+        }, 0, 1);
+
+        _selectedLabel.AutoSize = true;
+        _selectedLabel.Dock = DockStyle.Top;
+        _selectedLabel.BackColor = MetaBackground;
+        _selectedLabel.Padding = new Padding(11, 7, 11, 7);
+        _selectedLabel.ForeColor = PrimaryText;
+        _selectedLabel.Font = new Font("Microsoft JhengHei UI", 9F);
+        _selectedLabel.Margin = new Padding(0, 0, 0, 8);
+        body.Controls.Add(_selectedLabel, 0, 2);
 
         _tree.Dock = DockStyle.Fill;
         _tree.BorderStyle = BorderStyle.FixedSingle;
         _tree.HideSelection = false;
+        _tree.Margin = Padding.Empty;
         _tree.AfterSelect += (_, e) =>
         {
             _selectedSubpath = e.Node.Tag as string ?? "";
             RefreshSelectedLabel();
         };
-        treeWrap.Controls.Add(_tree, 0, 1);
-        root.Controls.Add(treeWrap, 0, 5);
+        body.Controls.Add(_tree, 0, 3);
 
-        _selectedLabel.AutoSize = true;
-        _selectedLabel.ForeColor = SecondaryText;
-        _selectedLabel.Margin = new Padding(0, 8, 0, 0);
-        root.Controls.Add(_selectedLabel, 0, 6);
-        return root;
+        return card;
+    }
+
+    private Control BuildAdvancedSection()
+    {
+        var card = MakeSectionCard(out var body);
+        card.Margin = new Padding(0, 0, 2, 0);
+
+        var toggle = new Label
+        {
+            AutoSize = true,
+            ForeColor = Accent,
+            Cursor = Cursors.Hand,
+            Font = new Font("Microsoft JhengHei UI", 9F),
+            Text = "▸ 進階設定（版號檔、Tag 前綴、合併方式）"
+        };
+        body.Controls.Add(toggle, 0, 0);
+
+        var advBody = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 3,
+            Visible = false,
+            Margin = new Padding(0, 12, 0, 0)
+        };
+        advBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34F));
+        advBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33F));
+        advBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33F));
+
+        var col1 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 0, 8, 0) };
+        col1.Controls.Add(MakeFieldLabel("版本檔路徑"), 0, 0);
+        _versionFileBox.Dock = DockStyle.Top;
+        _versionFileBox.Margin = new Padding(0, 5, 0, 0);
+        col1.Controls.Add(_versionFileBox, 0, 1);
+        advBody.Controls.Add(col1, 0, 0);
+
+        var col2 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(4, 0, 4, 0) };
+        col2.Controls.Add(MakeFieldLabel("Tag 前綴"), 0, 0);
+        _tagPrefixBox.Dock = DockStyle.Top;
+        _tagPrefixBox.Margin = new Padding(0, 5, 0, 0);
+        col2.Controls.Add(_tagPrefixBox, 0, 1);
+        advBody.Controls.Add(col2, 1, 0);
+
+        var col3 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(8, 0, 0, 0) };
+        col3.Controls.Add(MakeFieldLabel("合併方式"), 0, 0);
+        _mergeStrategyBox.Dock = DockStyle.Top;
+        _mergeStrategyBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _mergeStrategyBox.Margin = new Padding(0, 5, 0, 0);
+        _mergeStrategyBox.Items.AddRange(new object[] { "Merge commit（預設）", "Squash", "Rebase" });
+        _mergeStrategyBox.SelectedIndex = 0;
+        col3.Controls.Add(_mergeStrategyBox, 0, 1);
+        advBody.Controls.Add(col3, 2, 0);
+
+        toggle.Click += (_, _) =>
+        {
+            advBody.Visible = !advBody.Visible;
+            toggle.Text = advBody.Visible
+                ? "▾ 進階設定（版號檔、Tag 前綴、合併方式）"
+                : "▸ 進階設定（版號檔、Tag 前綴、合併方式）";
+        };
+
+        body.Controls.Add(advBody, 0, 1);
+        return card;
+    }
+
+    private Control BuildFooter()
+    {
+        var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Margin = new Padding(0, 12, 0, 0) };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        ConfigureSecondaryButton(_removeButton, "移除登錄", 100);
+        _removeButton.ForeColor = Danger;
+        _removeButton.FlatAppearance.BorderColor = DangerBorder;
+        _removeButton.Click += (_, _) => RemoveRegistration();
+        footer.Controls.Add(_removeButton, 0, 0);
+
+        var close = MakeSecondaryButton("完成", 90);
+        close.Margin = new Padding(8, 0, 0, 0);
+        close.Click += (_, _) =>
+        {
+            DialogResult = _changed ? DialogResult.OK : DialogResult.Cancel;
+            Close();
+        };
+        footer.Controls.Add(close, 1, 0);
+
+        ConfigurePrimaryButton(_saveButton, "儲存", 100);
+        _saveButton.Margin = new Padding(8, 0, 0, 0);
+        _saveButton.Click += async (_, _) => await SaveAsync();
+        footer.Controls.Add(_saveButton, 2, 0);
+
+        return footer;
+    }
+
+    private static RoundedCard MakeSectionCard(out TableLayoutPanel body, int extraRows = 0)
+    {
+        var card = new RoundedCard
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(18, 15, 18, 15)
+        };
+        body = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 2 + extraRows,
+            BackColor = Color.White
+        };
+        for (var i = 0; i < body.RowCount; i++)
+            body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.Controls.Add(body);
+        return card;
+    }
+
+    private static Control SectionHeader(int number, string title)
+    {
+        var row = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 0, 0, 12) };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        row.Controls.Add(new CircleBadge(number.ToString()) { Margin = new Padding(0, 1, 8, 0) }, 0, 0);
+        row.Controls.Add(new Label
+        {
+            Text = title,
+            AutoSize = true,
+            Font = new Font("Microsoft JhengHei UI", 10.5F, FontStyle.Bold),
+            ForeColor = PrimaryText
+        }, 1, 0);
+        return row;
+    }
+
+    private sealed class CircleBadge : Label
+    {
+        public CircleBadge(string number)
+        {
+            Text = number;
+            AutoSize = false;
+            Size = new Size(20, 20);
+            TextAlign = ContentAlignment.MiddleCenter;
+            ForeColor = Color.White;
+            Font = new Font("Microsoft JhengHei UI", 8.5F, FontStyle.Bold);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var brush = new SolidBrush(Accent);
+            e.Graphics.FillEllipse(brush, 0, 0, Width - 1, Height - 1);
+            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
     }
 
     private void RefreshProjectList(string? preferredName = null)
@@ -309,6 +490,14 @@ public sealed class ProjectManagerForm : Form
         _repoBox.Text = entry.GitHubRepo;
         _selectedSubpath = entry.RepoSubpath ?? "";
         _repoInfo.Text = $"Repo：{entry.GitHubRepo}\r\n本機位置：{entry.PhysicalPath}";
+        _versionFileBox.Text = entry.VersionFile ?? "";
+        _tagPrefixBox.Text = entry.TagPrefix ?? "";
+        _mergeStrategyBox.SelectedIndex = entry.MergeStrategy?.Trim().ToLowerInvariant() switch
+        {
+            "squash" => 1,
+            "rebase" => 2,
+            _ => 0
+        };
         _tree.Nodes.Clear();
         _selectedLabel.Text = string.IsNullOrWhiteSpace(_selectedSubpath)
             ? "目前選擇：Repo 根目錄（按「載入 Repo」可重新選擇）"
@@ -323,6 +512,9 @@ public sealed class ProjectManagerForm : Form
         _nameBox.Clear();
         _repoBox.Text = "";
         _repoInfo.Text = "";
+        _versionFileBox.Clear();
+        _tagPrefixBox.Clear();
+        _mergeStrategyBox.SelectedIndex = 0;
         _tree.Nodes.Clear();
         _selectedSubpath = "";
         _removeButton.Enabled = false;
@@ -442,8 +634,19 @@ public sealed class ProjectManagerForm : Form
             if (!Directory.Exists(fullPath))
                 throw new InvalidOperationException($"同步後找不到所選專案目錄：{subpath}");
 
-            var versionFile = _editing?.VersionFile ?? "";
+            var versionFile = _versionFileBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(versionFile) && File.Exists(Path.Combine(fullPath, "VERSION"))) versionFile = "VERSION";
+
+            var tagPrefix = _tagPrefixBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(tagPrefix))
+                tagPrefix = new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v";
+
+            var mergeStrategy = _mergeStrategyBox.SelectedIndex switch
+            {
+                1 => "squash",
+                2 => "rebase",
+                _ => "merge"
+            };
 
             var entry = new ProjectEntry
             {
@@ -455,10 +658,8 @@ public sealed class ProjectManagerForm : Form
                 GitHubRepo = _snapshot.GitHubRepo,
                 DefaultBranch = branch,
                 VersionFile = versionFile,
-                TagPrefix = string.IsNullOrWhiteSpace(_editing?.TagPrefix)
-                    ? new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v"
-                    : _editing!.TagPrefix,
-                MergeStrategy = string.IsNullOrWhiteSpace(_editing?.MergeStrategy) ? "merge" : _editing.MergeStrategy,
+                TagPrefix = tagPrefix,
+                MergeStrategy = mergeStrategy,
                 Active = true,
                 Extra = _editing?.Extra
             };
@@ -522,8 +723,9 @@ public sealed class ProjectManagerForm : Form
     {
         Text = text,
         AutoSize = true,
-        ForeColor = PrimaryText,
-        Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold)
+        ForeColor = SecondaryText,
+        Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold),
+        Margin = new Padding(0, 0, 0, 0)
     };
 
     private static Button MakeSecondaryButton(string text, int width)
@@ -542,6 +744,19 @@ public sealed class ProjectManagerForm : Form
         button.FlatAppearance.BorderColor = BorderColor;
         button.BackColor = Color.White;
         button.ForeColor = PrimaryText;
+        button.Margin = Padding.Empty;
+    }
+
+    private static void ConfigurePrimaryButton(Button button, string text, int width)
+    {
+        button.Text = text;
+        button.AutoSize = false;
+        button.Size = new Size(width, 34);
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.BackColor = Accent;
+        button.ForeColor = Color.White;
+        button.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
         button.Margin = Padding.Empty;
     }
 }
