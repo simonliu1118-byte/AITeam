@@ -28,6 +28,16 @@ public sealed class ChangeTaskServiceLogicTests
     }
 
     [Theory]
+    [InlineData("AITeamReview: PASS\nAITeamVersionBumpConfirm: MAJOR\n理由。", VersionBump.Major)]
+    [InlineData("AITeamReview: PASS\nAITeamVersionBumpConfirm: MINOR\n理由。", VersionBump.Minor)]
+    [InlineData("AITeamReview: PASS\nAITeamVersionBumpConfirm: PATCH\n理由。", VersionBump.Patch)]
+    [InlineData("AITeamReview: PASS\n沒有重新確認版號。", VersionBump.None)]
+    public void ParseVersionBumpConfirm_ReadsReviewerConfirmationOrDefaultsToNone(string review, VersionBump expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.ParseVersionBumpConfirm(review));
+    }
+
+    [Theory]
     [InlineData("AITeamReview: PASS\n看起來沒問題。", true)]
     [InlineData("AITeamReview: REPAIR\n還需要修正。", false)]
     [InlineData("AITeamReview: PASS\n但內文又提到 AITeamReview: REPAIR", false)]
