@@ -1,5 +1,19 @@
 # AITeam Governance Changelog
 
+## 2.2.0 — 2026/09/13
+
+- 補上 §7 的一個缺口：明確寫出 AITeam 的 change task **完成合併後不自動
+  建立 git tag、不自動建立／發布 GitHub Release**——這條原本只提到不自動
+  發布 GitHub Release，沒有明講 git tag，導致 AITeam 自己的 change task
+  pipeline（PIPELINE_REDESIGN.md §5.1）在合併後仍會自動打 tag，跟本文件
+  剛立下的「正式發布必須人工觸發」原則互相矛盾。
+- 這條規則對 AITeam 自己與其他 managed repository 一視同仁：版本檔
+  （VERSION／BUILD）照常在合併前更新，但 tag／Release 這個「正式版」身分
+  一律等使用者另外明確觸發才建立——避免每個小修正都變成一個沒有意義的
+  正式版本。
+- 對應的程式修改：`ChangeTaskService.RunAsync` 移除合併後自動打 tag／
+  push tag 的步驟，`ChangeTaskResult` 也拿掉不再有意義的 `Tag` 欄位。
+
 ## 2.1.0 — 2026/09/13
 
 - 補上 2.0.0 移除自動 Release 後缺少的正式發布流程：新增
