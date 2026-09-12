@@ -411,7 +411,7 @@ public sealed class MainWindow : Form
         _outputBox.BorderStyle = BorderStyle.None;
         _outputBox.BackColor = CardBackground;
         _outputBox.ForeColor = Color.FromArgb(55, 62, 70);
-        _outputBox.Font = new Font("Consolas", 9.5F);
+        _outputBox.Font = new Font("Microsoft JhengHei UI", 9.5F);
         _outputBox.DetectUrls = false;
         logCard.Controls.Add(_outputBox);
         layout.Controls.Add(logCard, 0, 3);
