@@ -91,6 +91,45 @@ public sealed class ChangeTaskServiceLogicTests
 
         Assert.Equal("AITeamRisk: NORMAL" + Environment.NewLine + "AITeamVersionBump: MINOR" + Environment.NewLine + "計畫內容。", body);
     }
+
+    [Theory]
+    [InlineData("https://github.com/owner/repo/pull/42\n", 42)]
+    [InlineData("Some warning line\nhttps://github.com/owner/repo/pull/7", 7)]
+    public void ParsePrNumberFromUrl_ExtractsNumberFromGhOutput(string output, int expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.ParsePrNumberFromUrl(output));
+    }
+
+    [Fact]
+    public void ParsePrNumberFromUrl_ThrowsWhenNoPrUrlPresent()
+    {
+        Assert.Throws<InvalidOperationException>(() => ChangeTaskService.ParsePrNumberFromUrl("no url here"));
+    }
+
+    [Theory]
+    [InlineData("squash", "--squash")]
+    [InlineData("SQUASH", "--squash")]
+    [InlineData("rebase", "--rebase")]
+    [InlineData("merge", "--merge")]
+    [InlineData(null, "--merge")]
+    [InlineData("", "--merge")]
+    [InlineData("something-else", "--merge")]
+    public void ResolveMergeFlag_MapsStrategyToGhFlagOrDefaultsToMerge(string? strategy, string expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.ResolveMergeFlag(strategy));
+    }
+
+    [Fact]
+    public void ParsePrState_ReadsStateField()
+    {
+        Assert.Equal("MERGED", ChangeTaskService.ParsePrState("""{ "state": "MERGED" }"""));
+    }
+
+    [Fact]
+    public void ParsePrState_ReturnsNull_WhenJsonInvalid()
+    {
+        Assert.Null(ChangeTaskService.ParsePrState("not json"));
+    }
 }
 
 public sealed class ChangeTaskServiceRoleSelectionTests

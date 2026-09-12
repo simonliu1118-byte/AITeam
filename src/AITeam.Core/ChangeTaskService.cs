@@ -176,8 +176,15 @@ public sealed class ChangeTaskService
                 progress($"⚠️ 僅 {available.Count} 個 AI 上線，Challenge 與 Final Review 將由同一個 AI（{challengeProvider.ToFriendlyName()}）執行，獨立性下降。");
             }
 
+            if (degradedReview && risk == ChangeRisk.Low)
+            {
+                risk = ChangeRisk.Normal;
+                progress("⚠️ 獨立審查被削弱本身就是風險因子，有效風險等級提升一級：LOW → NORMAL。");
+            }
+
             string finalReview = string.Empty;
             var lastFinalReviewer = finalProvider;
+            var lastChallenger = challengeProvider;
             for (var round = 0; round <= _workflow.MaxRepairRounds; round++)
             {
                 // 3 個 AI 都在線時，從第 2 輪起讓 Challenger / Final Reviewer 互換身分，
@@ -185,6 +192,7 @@ public sealed class ChangeTaskService
                 var roundChallenger = !degradedReview && round % 2 == 1 ? finalProvider : challengeProvider;
                 var roundFinal = !degradedReview && round % 2 == 1 ? challengeProvider : finalProvider;
                 lastFinalReviewer = roundFinal;
+                lastChallenger = roundChallenger;
                 if (degradedReview)
                     progress($"⚠️ 僅 2 個 AI 上線，本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
 
@@ -264,42 +272,100 @@ public sealed class ChangeTaskService
 
             var commitMessage = "AITeam: " + OneLine(request, 72);
             await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", commitMessage }, cancellationToken);
-            var taskCommit = (await RunGitCheckedAsync(worktreeRoot, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
 
-            progress("正式化前重新確認 GitHub 預設分支沒有被其他工作更新…");
-            await RunGitCheckedAsync(project.RepoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
-            var remoteSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", $"origin/{defaultBranch}" }, cancellationToken)).StandardOutput.Trim();
-            if (!remoteSha.Equals(baseSha, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("執行期間 GitHub 預設分支已出現新 commit。為避免覆蓋他人工作，本次不會推送；工作區已保留。");
-
-            var tagExists = await RunGitAsync(worktreeRoot, new[] { "rev-parse", "-q", "--verify", $"refs/tags/{tag}" }, cancellationToken);
-            if (tagExists.ExitCode == 0)
-                throw new InvalidOperationException($"Tag {tag} 已存在，為避免覆蓋既有版本，本次停止正式化。");
-
-            await RunGitCheckedAsync(worktreeRoot, new[] { "tag", "-a", tag, "-m", $"{project.Name} {newVersion}" }, cancellationToken);
-            progress("Commit / Tag 完成，原子推送 main + tag 到 GitHub…");
-            var push = await _runner.RunAsync(
+            progress($"推送任務分支 {taskBranch} 並開啟 PR…");
+            var pushTask = await _runner.RunAsync(
                 "git",
-                new[]
-                {
-                    "push", "--atomic", "origin",
-                    $"{taskCommit}:refs/heads/{defaultBranch}",
-                    $"refs/tags/{tag}:refs/tags/{tag}"
-                },
+                new[] { "push", "-u", "origin", $"{taskBranch}:refs/heads/{taskBranch}" },
                 worktreeRoot,
                 null,
-                TimeSpan.FromMinutes(3),
+                TimeSpan.FromMinutes(2),
                 cancellationToken);
-            if (push.ExitCode != 0)
-                throw new InvalidOperationException("GitHub 原子推送失敗；main/tag 均未應部分成功。工作區已保留：" + FirstUsefulLine(push.StandardError, push.StandardOutput));
+            if (pushTask.ExitCode != 0)
+                throw new InvalidOperationException("推送任務分支失敗：" + FirstUsefulLine(pushTask.StandardError, pushTask.StandardOutput));
+
+            var prBody = BuildPrBody(request, plan, risk, degradedReview, implementer, lastChallenger, lastFinalReviewer, newVersion, tag);
+            var prNumber = await CreatePullRequestAsync(project, taskBranch, defaultBranch, commitMessage, prBody, cancellationToken);
+            var prUrl = $"https://github.com/{project.GitHubRepo}/pull/{prNumber}";
+            progress($"已開啟 PR #{prNumber}：{prUrl}");
+
+            for (var ciRound = 0; ; ciRound++)
+            {
+                progress($"等待 {project.GitHubRepo} 的 CI 檢查結果…");
+                var (ciPassed, ciSummary) = await WaitForPrChecksAsync(project, prNumber, cancellationToken);
+                if (ciPassed)
+                {
+                    progress("CI 檢查通過。");
+                    break;
+                }
+
+                if (ciRound == _workflow.MaxCiRepairRounds)
+                    throw new InvalidOperationException(
+                        $"CI 連續 {_workflow.MaxCiRepairRounds} 輪修正後仍未通過。PR 已保留供人工檢查，不會自動合併：{prUrl}");
+
+                progress($"CI 檢查失敗；{implementer.ToFriendlyName()} 依失敗訊息進行第 {ciRound + 1} 輪修正…");
+                await RunWriteAsync(
+                    implementer,
+                    workingDirectory,
+                    BuildCiRepairPrompt(request, plan, ciSummary),
+                    cancellationToken);
+                await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+                await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
+                var ciFixStatus = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
+                if (string.IsNullOrWhiteSpace(ciFixStatus.StandardOutput))
+                    throw new InvalidOperationException($"CI 修正沒有產生任何變更，無法繼續。PR 已保留：{prUrl}");
+
+                await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", $"AITeam: fix CI (round {ciRound + 1})" }, cancellationToken);
+                var pushFix = await _runner.RunAsync(
+                    "git",
+                    new[] { "push", "origin", taskBranch },
+                    worktreeRoot,
+                    null,
+                    TimeSpan.FromMinutes(2),
+                    cancellationToken);
+                if (pushFix.ExitCode != 0)
+                    throw new InvalidOperationException("推送 CI 修正失敗：" + FirstUsefulLine(pushFix.StandardError, pushFix.StandardOutput));
+            }
+
+            if (risk == ChangeRisk.High)
+            {
+                progress($"⚠️ 高風險變更，需要人工確認合併：{prUrl}");
+                await WaitForManualMergeAsync(project, prNumber, cancellationToken);
+                progress("偵測到 PR 已由人工合併。");
+            }
+            else
+            {
+                progress("風險等級允許自動合併，執行合併…");
+                await MergePullRequestAsync(project, prNumber, project.MergeStrategy, cancellationToken);
+                progress("PR 已自動合併。");
+            }
+
+            progress("合併完成；重新同步並打 tag…");
+            await RunGitCheckedAsync(project.RepoPath, new[] { "fetch", "--prune", "origin" }, cancellationToken);
+            var mergeSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", $"origin/{defaultBranch}" }, cancellationToken)).StandardOutput.Trim();
+
+            var tagExists = await RunGitAsync(project.RepoPath, new[] { "rev-parse", "-q", "--verify", $"refs/tags/{tag}" }, cancellationToken);
+            if (tagExists.ExitCode == 0)
+                throw new InvalidOperationException($"Tag {tag} 已存在，為避免覆蓋既有版本，本次停止打 tag（PR 已合併，僅 tag 未完成）。");
+
+            await RunGitCheckedAsync(project.RepoPath, new[] { "tag", "-a", tag, mergeSha, "-m", $"{project.Name} {newVersion}" }, cancellationToken);
+            var pushTag = await _runner.RunAsync(
+                "git",
+                new[] { "push", "origin", $"refs/tags/{tag}:refs/tags/{tag}" },
+                project.RepoPath,
+                null,
+                TimeSpan.FromMinutes(2),
+                cancellationToken);
+            if (pushTag.ExitCode != 0)
+                throw new InvalidOperationException("Tag 推送失敗（PR 已合併，僅 tag 未完成）：" + FirstUsefulLine(pushTag.StandardError, pushTag.StandardOutput));
 
             formalized = true;
             progress("GitHub 正式版本已完成。同步本機預設分支…");
             await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
-            var summary = $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}）。";
+            var summary = $"修改完成並已正式發布：{project.Name} {newVersion}（{tag}），PR：{prUrl}";
             if (degradedReview)
-                summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降。";
+                summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升）。";
 
             return new ChangeTaskResult(
                 implementer,
@@ -326,6 +392,17 @@ public sealed class ChangeTaskService
                 }
                 catch { }
                 try { if (Directory.Exists(worktreeRoot)) Directory.Delete(worktreeRoot, true); } catch { }
+                try
+                {
+                    await _runner.RunAsync(
+                        "git",
+                        new[] { "branch", "-D", taskBranch },
+                        project.RepoPath,
+                        null,
+                        TimeSpan.FromSeconds(30),
+                        CancellationToken.None);
+                }
+                catch { }
             }
             else if (worktreeAdded && !formalized)
             {
@@ -421,6 +498,101 @@ public sealed class ChangeTaskService
             discussion.AppendLine(plan);
             discussion.AppendLine("使用者補充：");
             discussion.AppendLine(confirmation.Text ?? string.Empty);
+        }
+    }
+
+    private async Task<int> CreatePullRequestAsync(
+        ProjectEntry project,
+        string taskBranch,
+        string defaultBranch,
+        string title,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        var tempDir = Path.Combine(_runtimeRoot, "temp");
+        Directory.CreateDirectory(tempDir);
+        var bodyFile = Path.Combine(tempDir, "pr-body-" + Guid.NewGuid().ToString("N") + ".md");
+        try
+        {
+            await File.WriteAllTextAsync(bodyFile, body, cancellationToken);
+            var result = await _runner.RunAsync(
+                "gh",
+                new[]
+                {
+                    "pr", "create",
+                    "--repo", project.GitHubRepo,
+                    "--base", defaultBranch,
+                    "--head", taskBranch,
+                    "--title", title,
+                    "--body-file", bodyFile
+                },
+                project.RepoPath,
+                null,
+                TimeSpan.FromMinutes(2),
+                cancellationToken);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException("開啟 PR 失敗：" + FirstUsefulLine(result.StandardError, result.StandardOutput));
+            return ParsePrNumberFromUrl(result.StandardOutput);
+        }
+        finally
+        {
+            try { if (File.Exists(bodyFile)) File.Delete(bodyFile); } catch { }
+        }
+    }
+
+    private async Task<(bool Passed, string Summary)> WaitForPrChecksAsync(
+        ProjectEntry project,
+        int prNumber,
+        CancellationToken cancellationToken)
+    {
+        var result = await _runner.RunAsync(
+            "gh",
+            new[] { "pr", "checks", prNumber.ToString(), "--repo", project.GitHubRepo, "--watch", "--fail-fast" },
+            project.RepoPath,
+            null,
+            TimeSpan.FromMinutes(20),
+            cancellationToken);
+        var summary = string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
+        return (result.ExitCode == 0, summary);
+    }
+
+    private async Task MergePullRequestAsync(
+        ProjectEntry project,
+        int prNumber,
+        string? mergeStrategy,
+        CancellationToken cancellationToken)
+    {
+        var result = await _runner.RunAsync(
+            "gh",
+            new[] { "pr", "merge", prNumber.ToString(), "--repo", project.GitHubRepo, ResolveMergeFlag(mergeStrategy), "--delete-branch" },
+            project.RepoPath,
+            null,
+            TimeSpan.FromMinutes(2),
+            cancellationToken);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException("合併 PR 失敗：" + FirstUsefulLine(result.StandardError, result.StandardOutput));
+    }
+
+    private async Task WaitForManualMergeAsync(ProjectEntry project, int prNumber, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var view = await _runner.RunAsync(
+                "gh",
+                new[] { "pr", "view", prNumber.ToString(), "--repo", project.GitHubRepo, "--json", "state" },
+                project.RepoPath,
+                null,
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+            if (view.ExitCode == 0)
+            {
+                var state = ParsePrState(view.StandardOutput);
+                if (string.Equals(state, "MERGED", StringComparison.OrdinalIgnoreCase)) return;
+                if (string.Equals(state, "CLOSED", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"PR #{prNumber} 已被關閉但未合併，任務中止。");
+            }
+            await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
         }
     }
 
@@ -704,6 +876,44 @@ The Plan Gate originally classified the version bump as {plannedBump}.
 Then give your rationale in Traditional Chinese.
 """;
 
+    private static string BuildPrBody(
+        string request, string plan, ChangeRisk risk, bool degradedReview,
+        ProviderId implementer, ProviderId challenger, ProviderId finalReviewer,
+        string newVersion, string tag)
+    {
+        var degradedNote = degradedReview
+            ? "\n\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升一級）。"
+            : "";
+        return $"""
+## AITeam 自動化變更
+
+**需求**：{request}
+
+**版本**：{newVersion}（{tag}）
+**風險等級**：{risk}{degradedNote}
+
+**執行角色**
+- Implementer：{implementer.ToFriendlyName()}
+- Challenger：{challenger.ToFriendlyName()}
+- Final Reviewer：{finalReviewer.ToFriendlyName()}
+
+**計畫摘要**
+
+{plan}
+""";
+    }
+
+    private static string BuildCiRepairPrompt(string request, string plan, string ciSummary) => $"""
+You are AITeam CI-repair implementer. Work only inside this isolated Git worktree. The pull request's CI checks failed; fix the cause without expanding scope unnecessarily.
+Request: {request}
+Approved plan:
+{plan}
+CI check summary:
+{ciSummary}
+
+Re-check the actual current file contents before editing. Make the required edits and run relevant tests/build locally if possible. Do not commit, tag, push, merge, or modify anything outside this worktree; AITeam controller owns Git operations. Summarize the fix and how it addresses the CI failure.
+""";
+
     internal static ChangeRisk ParseRisk(string plan)
     {
         if (plan.Contains("AITeamRisk: HIGH", StringComparison.OrdinalIgnoreCase)) return ChangeRisk.High;
@@ -740,6 +950,34 @@ Then give your rationale in Traditional Chinese.
         if (lines.Count > 0 && lines[0].StartsWith("AITeamPlanStatus:", StringComparison.OrdinalIgnoreCase))
             lines.RemoveAt(0);
         return string.Join(Environment.NewLine, lines).Trim();
+    }
+
+    internal static int ParsePrNumberFromUrl(string output)
+    {
+        var matches = Regex.Matches(output, @"/pull/(\d+)");
+        if (matches.Count == 0)
+            throw new InvalidOperationException("無法從 gh pr create 的輸出解析 PR 編號：" + FirstUsefulLine(output));
+        return int.Parse(matches[^1].Groups[1].Value);
+    }
+
+    internal static string ResolveMergeFlag(string? mergeStrategy) => mergeStrategy?.Trim().ToLowerInvariant() switch
+    {
+        "squash" => "--squash",
+        "rebase" => "--rebase",
+        _ => "--merge"
+    };
+
+    internal static string? ParsePrState(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("state", out var state) ? state.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     internal static string? ParseRepairDispute(string repairResult)

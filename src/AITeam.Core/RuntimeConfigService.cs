@@ -4,9 +4,9 @@ using AITeam.Models;
 
 namespace AITeam.Services;
 
-public sealed record WorkflowSettings(int MaxRepairRounds)
+public sealed record WorkflowSettings(int MaxRepairRounds, int MaxCiRepairRounds = 3)
 {
-    public static readonly WorkflowSettings Default = new(3);
+    public static readonly WorkflowSettings Default = new(3, 3);
 }
 
 public sealed record AgentsConfig(
@@ -70,17 +70,28 @@ public sealed class RuntimeConfigService
         });
 
         var maxRepairRounds = WorkflowSettings.Default.MaxRepairRounds;
+        var maxCiRepairRounds = WorkflowSettings.Default.MaxCiRepairRounds;
         if (document.RootElement.TryGetProperty("workflow", out var workflow) &&
-            workflow.ValueKind == JsonValueKind.Object &&
-            workflow.TryGetProperty("max_repair_rounds", out var value) &&
-            value.ValueKind == JsonValueKind.Number &&
-            value.TryGetInt32(out var parsed) &&
-            parsed >= 0)
+            workflow.ValueKind == JsonValueKind.Object)
         {
-            maxRepairRounds = parsed;
+            if (workflow.TryGetProperty("max_repair_rounds", out var value) &&
+                value.ValueKind == JsonValueKind.Number &&
+                value.TryGetInt32(out var parsed) &&
+                parsed >= 0)
+            {
+                maxRepairRounds = parsed;
+            }
+
+            if (workflow.TryGetProperty("max_ci_repair_rounds", out var ciValue) &&
+                ciValue.ValueKind == JsonValueKind.Number &&
+                ciValue.TryGetInt32(out var ciParsed) &&
+                ciParsed >= 0)
+            {
+                maxCiRepairRounds = ciParsed;
+            }
         }
 
-        return new WorkflowSettings(maxRepairRounds);
+        return new WorkflowSettings(maxRepairRounds, maxCiRepairRounds);
     }
 
     internal static AgentsConfig ParseAgentsConfig(string json)
