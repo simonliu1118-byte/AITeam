@@ -496,7 +496,7 @@ public sealed class MainWindow : Form
         {
             var health = await item.Value;
             _providerCards[item.Key].SetHealth(health);
-            AppendLog($"{FriendlyProvider(item.Key)}：{FriendlyState(health)} ({health.Duration.TotalSeconds:0.0}s)");
+            AppendLog($"{item.Key.ToFriendlyName()}：{health.State.ToFriendlyName()} ({health.Duration.TotalSeconds:0.0}s)");
         }
         _recheckButton.Enabled = true;
         AppendLog("AI 檢查完成。");
@@ -528,19 +528,17 @@ public sealed class MainWindow : Form
                 text => AppendLog(text),
                 _lifetimeCts.Token);
 
-            if (result.Intent == RequestIntent.Inquiry)
+            if (result.Intent == RequestIntent.Change && result.Change is { } change)
             {
-                _currentTaskState.Text = $"查詢完成 · {FriendlyProvider(result.Provider)}";
+                _currentTaskState.Text = $"修改完成 · {change.Version}（{change.Tag}）";
                 AppendLog("");
                 AppendLog(result.Answer);
             }
             else
             {
-                _currentTaskState.Text = "已辨識為修改任務";
+                _currentTaskState.Text = $"查詢完成 · {result.Provider.ToFriendlyName()}";
                 AppendLog("");
                 AppendLog(result.Answer);
-                AppendLog("");
-                AppendLog("v0.4.0 已能真實判斷查詢/修改需求；完整三 AI 修改管線尚未接入，因此本次沒有修改 project source。");
             }
         }
         catch (OperationCanceledException)
@@ -607,27 +605,6 @@ public sealed class MainWindow : Form
         }
         _lifetimeCts.Cancel();
     }
-
-    private static string FriendlyProvider(ProviderId provider) => provider switch
-    {
-        ProviderId.Codex => "GPT / Codex",
-        ProviderId.Claude => "Claude",
-        ProviderId.Antigravity => "Gemini / Antigravity",
-        _ => provider.ToString()
-    };
-
-    private static string FriendlyState(ProviderHealth health) => health.State switch
-    {
-        ProviderHealthState.Unknown => "待檢查",
-        ProviderHealthState.Checking => "檢測中",
-        ProviderHealthState.Online => "上線",
-        ProviderHealthState.Quota => "超過限額",
-        ProviderHealthState.AuthenticationRequired => "需要重新登入",
-        ProviderHealthState.TemporaryError => "暫時異常",
-        ProviderHealthState.Error => "錯誤",
-        ProviderHealthState.Missing => "CLI 未安裝",
-        _ => health.State.ToString()
-    };
 
     private void AppendLog(string text)
     {

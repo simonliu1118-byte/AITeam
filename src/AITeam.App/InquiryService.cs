@@ -12,7 +12,8 @@ public enum RequestIntent
 public sealed record InquiryResult(
     RequestIntent Intent,
     ProviderId Provider,
-    string Answer);
+    string Answer,
+    ChangeTaskResult? Change = null);
 
 public sealed class ChangePipelineDispatchException : Exception
 {
@@ -77,7 +78,7 @@ public sealed class InquiryService
             foreach (var provider in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                progress($"{FriendlyProvider(provider)} 正在讀取專案並判斷需求…");
+                progress($"{provider.ToFriendlyName()} 正在讀取專案並判斷需求…");
                 try
                 {
                     var answer = await RunProviderAsync(provider, workingDirectory, prompt, cancellationToken);
@@ -97,8 +98,8 @@ public sealed class InquiryService
                                 progress,
                                 cancellationToken);
 
-                            var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{FriendlyProvider(change.Implementer)}\r\nFinal Review：{FriendlyProvider(change.FinalReviewer)}";
-                            return new InquiryResult(RequestIntent.Inquiry, change.FinalReviewer, summary);
+                            var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";
+                            return new InquiryResult(RequestIntent.Change, change.FinalReviewer, summary, change);
                         }
                         catch (OperationCanceledException)
                         {
@@ -114,8 +115,8 @@ public sealed class InquiryService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not ChangePipelineDispatchException)
                 {
-                    failures.Add($"{FriendlyProvider(provider)}：{ex.Message}");
-                    progress($"{FriendlyProvider(provider)} 本次失敗，嘗試下一個 AI。");
+                    failures.Add($"{provider.ToFriendlyName()}：{ex.Message}");
+                    progress($"{provider.ToFriendlyName()} 本次失敗，嘗試下一個 AI。");
                 }
             }
 
@@ -325,12 +326,4 @@ User request:
         }
         return "未知錯誤";
     }
-
-    private static string FriendlyProvider(ProviderId provider) => provider switch
-    {
-        ProviderId.Codex => "GPT / Codex",
-        ProviderId.Claude => "Claude",
-        ProviderId.Antigravity => "Gemini / Antigravity",
-        _ => provider.ToString()
-    };
 }

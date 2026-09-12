@@ -54,7 +54,7 @@ public sealed class ChangeTaskService
             throw new DirectoryNotFoundException($"找不到專案 Repo：{project.RepoPath}");
 
         progress("同步 GitHub 預設分支並確認本機 Repo 安全狀態…");
-        var defaultBranch = await _git.SafeSyncAsync(project.RepoPath, cancellationToken);
+        var defaultBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
         var baseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
 
         var taskId = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6];
@@ -86,7 +86,7 @@ public sealed class ChangeTaskService
                 throw new DirectoryNotFoundException($"隔離工作區內找不到專案目錄：{project.RepoSubpath}");
 
             var scout = Pick(available, ProviderId.Antigravity, ProviderId.Codex, ProviderId.Claude);
-            progress($"{FriendlyProvider(scout)}：Scout / evidence…");
+            progress($"{scout.ToFriendlyName()}：Scout / evidence…");
             var scoutReport = await RunReadOnlyAsync(
                 scout,
                 workingDirectory,
@@ -94,7 +94,7 @@ public sealed class ChangeTaskService
                 cancellationToken);
 
             var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
-            progress($"{FriendlyProvider(planner)}：Plan Gate / risk…");
+            progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
             var plan = await RunReadOnlyAsync(
                 planner,
                 workingDirectory,
@@ -106,7 +106,7 @@ public sealed class ChangeTaskService
             progress($"Plan Gate：Risk={risk}，Version={bump}");
 
             var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
-            progress($"{FriendlyProvider(implementer)}：開始實作與測試…");
+            progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
             await RunWriteAsync(
                 implementer,
                 workingDirectory,
@@ -132,14 +132,14 @@ public sealed class ChangeTaskService
             for (var round = 0; round <= 3; round++)
             {
                 var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
-                progress($"{FriendlyProvider(challengeProvider)}：獨立 Challenge…");
+                progress($"{challengeProvider.ToFriendlyName()}：獨立 Challenge…");
                 var challenge = await RunReadOnlyAsync(
                     challengeProvider,
                     workingDirectory,
                     BuildChallengePrompt(request, plan, diff),
                     cancellationToken);
 
-                progress($"{FriendlyProvider(finalProvider)}：Final Review…");
+                progress($"{finalProvider.ToFriendlyName()}：Final Review…");
                 finalReview = await RunReadOnlyAsync(
                     finalProvider,
                     workingDirectory,
@@ -158,7 +158,7 @@ public sealed class ChangeTaskService
                 var repairer = available.Contains(implementer)
                     ? implementer
                     : Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
-                progress($"Final Review 要求修正；{FriendlyProvider(repairer)} 進行第 {round + 1} 輪 Repair…");
+                progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
                 await RunWriteAsync(
                     repairer,
                     workingDirectory,
@@ -209,7 +209,7 @@ public sealed class ChangeTaskService
 
             formalized = true;
             progress("GitHub 正式版本已完成。同步本機預設分支…");
-            await _git.SafeSyncAsync(project.RepoPath, cancellationToken);
+            await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
             return new ChangeTaskResult(
                 implementer,
@@ -246,9 +246,9 @@ public sealed class ChangeTaskService
     private async Task VerifyWorkingTreeAsync(string worktreeRoot, Action<string> progress, CancellationToken cancellationToken)
     {
         progress("Verification：檢查 Git diff / whitespace / 工作區狀態…");
-        var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "--check" }, cancellationToken);
+        var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--check" }, cancellationToken);
         if (diffCheck.ExitCode != 0)
-            throw new InvalidOperationException("Verification 失敗（git diff --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
+            throw new InvalidOperationException("Verification 失敗（git diff HEAD --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
 
         var status = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
         if (string.IsNullOrWhiteSpace(status.StandardOutput))
@@ -311,7 +311,7 @@ public sealed class ChangeTaskService
     {
         var result = await RunProviderAsync(provider, workingDirectory, prompt, true, cancellationToken);
         if (string.IsNullOrWhiteSpace(result))
-            throw new InvalidOperationException($"{FriendlyProvider(provider)} 沒有回傳實作結果。");
+            throw new InvalidOperationException($"{provider.ToFriendlyName()} 沒有回傳實作結果。");
     }
 
     private async Task<string> RunProviderAsync(
@@ -584,12 +584,4 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
         var value = Regex.Replace(text, "\\s+", " ").Trim();
         return value.Length <= max ? value : value[..max].TrimEnd();
     }
-
-    private static string FriendlyProvider(ProviderId provider) => provider switch
-    {
-        ProviderId.Codex => "GPT / Codex",
-        ProviderId.Claude => "Claude",
-        ProviderId.Antigravity => "Gemini / Antigravity",
-        _ => provider.ToString()
-    };
 }
