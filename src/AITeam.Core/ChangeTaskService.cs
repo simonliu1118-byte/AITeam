@@ -110,6 +110,11 @@ public sealed class ChangeTaskService
             if (!Directory.Exists(workingDirectory))
                 throw new DirectoryNotFoundException($"隔離工作區內找不到專案目錄：{project.RepoSubpath}");
 
+            var hasCi = HasGitHubActionsWorkflows(worktreeRoot);
+            var techStackHint = DetectTechStackHint(workingDirectory);
+            if (!hasCi)
+                progress($"⚠️ 目標專案偵測不到 GitHub Actions CI（推測技術棧：{techStackHint}）；本次計畫會一併要求補建最小可用的 CI。");
+
             var scout = Pick(available, ProviderId.Antigravity, ProviderId.Codex, ProviderId.Claude);
             progress($"{scout.ToFriendlyName()}：Scout / evidence…");
             var scoutReport = await RunReadOnlyAsync(
@@ -120,7 +125,7 @@ public sealed class ChangeTaskService
 
             var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
             var (plan, risk, bump) = await RunPlanGateDiscussionAsync(
-                project, request, scoutReport, planner, workingDirectory, askUser, progress, cancellationToken);
+                project, request, scoutReport, planner, workingDirectory, hasCi, techStackHint, askUser, progress, cancellationToken);
 
             progress("計畫已定案；重新同步 GitHub 預設分支並重新鎖定基準版本…");
             var refreshedBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
@@ -289,42 +294,57 @@ public sealed class ChangeTaskService
             var prUrl = $"https://github.com/{project.GitHubRepo}/pull/{prNumber}";
             progress($"已開啟 PR #{prNumber}：{prUrl}");
 
-            for (var ciRound = 0; ; ciRound++)
+            var skipCiGate = false;
+            if (!hasCi)
             {
-                progress($"等待 {project.GitHubRepo} 的 CI 檢查結果…");
-                var (ciPassed, ciSummary) = await WaitForPrChecksAsync(project, prNumber, cancellationToken);
-                if (ciPassed)
+                progress("先前偵測到這個專案沒有 CI；確認這次一併補建的 workflow 是否真的被 GitHub 觸發…");
+                var hasAnyChecks = await WaitForAnyPrCheckAsync(project, prNumber, TimeSpan.FromMinutes(2), cancellationToken);
+                if (!hasAnyChecks)
                 {
-                    progress("CI 檢查通過。");
-                    break;
+                    skipCiGate = true;
+                    progress("⚠️ 等待後 PR 上仍未出現任何檢查（可能是這個 repo 的權限限制）。這是首次補建 CI，本次僅依 Final Review 把關、跳過 CI 閘門；下一次任務開始，CI 應該已經正常運作。");
                 }
+            }
 
-                if (ciRound == _workflow.MaxCiRepairRounds)
-                    throw new InvalidOperationException(
-                        $"CI 連續 {_workflow.MaxCiRepairRounds} 輪修正後仍未通過。PR 已保留供人工檢查，不會自動合併：{prUrl}");
+            if (!skipCiGate)
+            {
+                for (var ciRound = 0; ; ciRound++)
+                {
+                    progress($"等待 {project.GitHubRepo} 的 CI 檢查結果…");
+                    var (ciPassed, ciSummary) = await WaitForPrChecksAsync(project, prNumber, cancellationToken);
+                    if (ciPassed)
+                    {
+                        progress("CI 檢查通過。");
+                        break;
+                    }
 
-                progress($"CI 檢查失敗；{implementer.ToFriendlyName()} 依失敗訊息進行第 {ciRound + 1} 輪修正…");
-                await RunWriteAsync(
-                    implementer,
-                    workingDirectory,
-                    BuildCiRepairPrompt(request, plan, ciSummary),
-                    cancellationToken);
-                await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
-                await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
-                var ciFixStatus = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
-                if (string.IsNullOrWhiteSpace(ciFixStatus.StandardOutput))
-                    throw new InvalidOperationException($"CI 修正沒有產生任何變更，無法繼續。PR 已保留：{prUrl}");
+                    if (ciRound == _workflow.MaxCiRepairRounds)
+                        throw new InvalidOperationException(
+                            $"CI 連續 {_workflow.MaxCiRepairRounds} 輪修正後仍未通過。PR 已保留供人工檢查，不會自動合併：{prUrl}");
 
-                await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", $"AITeam: fix CI (round {ciRound + 1})" }, cancellationToken);
-                var pushFix = await _runner.RunAsync(
-                    "git",
-                    new[] { "push", "origin", taskBranch },
-                    worktreeRoot,
-                    null,
-                    TimeSpan.FromMinutes(2),
-                    cancellationToken);
-                if (pushFix.ExitCode != 0)
-                    throw new InvalidOperationException("推送 CI 修正失敗：" + FirstUsefulLine(pushFix.StandardError, pushFix.StandardOutput));
+                    progress($"CI 檢查失敗；{implementer.ToFriendlyName()} 依失敗訊息進行第 {ciRound + 1} 輪修正…");
+                    await RunWriteAsync(
+                        implementer,
+                        workingDirectory,
+                        BuildCiRepairPrompt(request, plan, ciSummary),
+                        cancellationToken);
+                    await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+                    await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
+                    var ciFixStatus = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
+                    if (string.IsNullOrWhiteSpace(ciFixStatus.StandardOutput))
+                        throw new InvalidOperationException($"CI 修正沒有產生任何變更，無法繼續。PR 已保留：{prUrl}");
+
+                    await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", $"AITeam: fix CI (round {ciRound + 1})" }, cancellationToken);
+                    var pushFix = await _runner.RunAsync(
+                        "git",
+                        new[] { "push", "origin", taskBranch },
+                        worktreeRoot,
+                        null,
+                        TimeSpan.FromMinutes(2),
+                        cancellationToken);
+                    if (pushFix.ExitCode != 0)
+                        throw new InvalidOperationException("推送 CI 修正失敗：" + FirstUsefulLine(pushFix.StandardError, pushFix.StandardOutput));
+                }
             }
 
             if (risk == ChangeRisk.High)
@@ -429,6 +449,8 @@ public sealed class ChangeTaskService
         string scoutReport,
         ProviderId planner,
         string workingDirectory,
+        bool hasCi,
+        string techStackHint,
         Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
         CancellationToken cancellationToken)
@@ -443,7 +465,7 @@ public sealed class ChangeTaskService
             var reply = await RunReadOnlyAsync(
                 planner,
                 workingDirectory,
-                BuildPlanPrompt(project, request, scoutReport, discussion.ToString(), mustFinalize),
+                BuildPlanPrompt(project, request, scoutReport, discussion.ToString(), mustFinalize, hasCi, techStackHint),
                 cancellationToken);
 
             if (!mustFinalize && IsPlanGateNeedsInput(reply))
@@ -554,6 +576,30 @@ public sealed class ChangeTaskService
             cancellationToken);
         var summary = string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
         return (result.ExitCode == 0, summary);
+    }
+
+    private async Task<bool> WaitForAnyPrCheckAsync(
+        ProjectEntry project,
+        int prNumber,
+        TimeSpan gracePeriod,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + gracePeriod;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var probe = await _runner.RunAsync(
+                "gh",
+                new[] { "pr", "checks", prNumber.ToString(), "--repo", project.GitHubRepo },
+                project.RepoPath,
+                null,
+                TimeSpan.FromSeconds(30),
+                cancellationToken);
+            var text = string.IsNullOrWhiteSpace(probe.StandardOutput) ? probe.StandardError : probe.StandardOutput;
+            if (!NoChecksReported(text)) return true;
+            if (DateTime.UtcNow >= deadline) return false;
+            await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
+        }
     }
 
     private async Task MergePullRequestAsync(
@@ -751,12 +797,21 @@ Request: {request}
 Return concise Traditional Chinese with relevant file paths, symbols, current behavior, likely tests, and risks. Do not design an elaborate evidence pipeline; inspect the repo directly.
 """;
 
-    private static string BuildPlanPrompt(ProjectEntry project, string request, string scout, string discussion, bool mustFinalize)
+    private static string BuildPlanPrompt(
+        ProjectEntry project, string request, string scout, string discussion, bool mustFinalize,
+        bool hasCi, string techStackHint)
     {
         var discussionSection = discussion.Length == 0 ? "（尚無先前討論）" : discussion;
         var decisionInstruction = mustFinalize
             ? "The user has chosen to hand off the final decision to you. This reply MUST output AITeamPlanStatus: READY with a complete plan — do not ask any more questions."
             : "If anything about the request is unclear or could materially change the implementation approach, output AITeamPlanStatus: NEEDS_INPUT and ask concrete question(s) instead of guessing — do not provide the full plan yet. Only output AITeamPlanStatus: READY once you are confident the plan is well-defined. There is no limit on how many rounds of questions you may ask.";
+        var ciInstruction = hasCi
+            ? ""
+            : $"""
+
+This project has no GitHub Actions workflow at all yet (detected tech stack: {techStackHint}). Your plan MUST also include, as part of this same task, adding a minimal GitHub Actions workflow that builds and runs whatever tests exist for this project's stack. Do not open a separate task for it — it ships in the same PR as the requested change.
+
+""";
 
         return $"""
 You are AITeam Plan Gate. Validate the Scout evidence against the repository, discuss with the user when needed, then finalize the implementation plan. Do not modify files.
@@ -767,7 +822,7 @@ Scout report:
 
 Discussion with the user so far:
 {discussionSection}
-
+{ciInstruction}
 {decisionInstruction}
 
 Your first line MUST be exactly one of:
@@ -966,6 +1021,27 @@ Re-check the actual current file contents before editing. Make the required edit
         "rebase" => "--rebase",
         _ => "--merge"
     };
+
+    internal static bool HasGitHubActionsWorkflows(string repoRoot)
+    {
+        var workflowsDir = Path.Combine(repoRoot, ".github", "workflows");
+        return Directory.Exists(workflowsDir) && Directory.EnumerateFiles(workflowsDir).Any();
+    }
+
+    internal static string DetectTechStackHint(string workingDirectory)
+    {
+        if (Directory.EnumerateFiles(workingDirectory, "*.sln", SearchOption.TopDirectoryOnly).Any() ||
+            Directory.EnumerateFiles(workingDirectory, "*.csproj", SearchOption.AllDirectories).Any())
+            return "dotnet";
+        if (File.Exists(Path.Combine(workingDirectory, "package.json"))) return "node";
+        if (File.Exists(Path.Combine(workingDirectory, "pyproject.toml")) || File.Exists(Path.Combine(workingDirectory, "requirements.txt"))) return "python";
+        if (File.Exists(Path.Combine(workingDirectory, "go.mod"))) return "go";
+        if (File.Exists(Path.Combine(workingDirectory, "Cargo.toml"))) return "rust";
+        return "unknown";
+    }
+
+    internal static bool NoChecksReported(string ghOutput) =>
+        ghOutput.Contains("no checks reported", StringComparison.OrdinalIgnoreCase);
 
     internal static string? ParsePrState(string json)
     {

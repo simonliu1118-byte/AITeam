@@ -130,6 +130,78 @@ public sealed class ChangeTaskServiceLogicTests
     {
         Assert.Null(ChangeTaskService.ParsePrState("not json"));
     }
+
+    [Theory]
+    [InlineData("no checks reported on the 'main' branch", true)]
+    [InlineData("No Checks Reported", true)]
+    [InlineData("✓ build\tpass\t1m2s", false)]
+    public void NoChecksReported_DetectsGhsNoChecksMessage(string output, bool expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.NoChecksReported(output));
+    }
+}
+
+public sealed class ChangeTaskServiceCiDetectionTests : IDisposable
+{
+    private readonly string _root;
+
+    public ChangeTaskServiceCiDetectionTests()
+    {
+        _root = Path.Combine(Path.GetTempPath(), "aiteam-ci-detect-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_root);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, true); } catch { }
+    }
+
+    [Fact]
+    public void HasGitHubActionsWorkflows_FalseWhenDirectoryMissing()
+    {
+        Assert.False(ChangeTaskService.HasGitHubActionsWorkflows(_root));
+    }
+
+    [Fact]
+    public void HasGitHubActionsWorkflows_FalseWhenDirectoryEmpty()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".github", "workflows"));
+        Assert.False(ChangeTaskService.HasGitHubActionsWorkflows(_root));
+    }
+
+    [Fact]
+    public void HasGitHubActionsWorkflows_TrueWhenAnyWorkflowFileExists()
+    {
+        var dir = Path.Combine(_root, ".github", "workflows");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "ci.yml"), "name: ci");
+        Assert.True(ChangeTaskService.HasGitHubActionsWorkflows(_root));
+    }
+
+    [Fact]
+    public void DetectTechStackHint_ReturnsUnknown_WhenNoRecognizedFiles()
+    {
+        Assert.Equal("unknown", ChangeTaskService.DetectTechStackHint(_root));
+    }
+
+    [Theory]
+    [InlineData("package.json", "node")]
+    [InlineData("requirements.txt", "python")]
+    [InlineData("pyproject.toml", "python")]
+    [InlineData("go.mod", "go")]
+    [InlineData("Cargo.toml", "rust")]
+    public void DetectTechStackHint_RecognizesCommonManifestFiles(string fileName, string expected)
+    {
+        File.WriteAllText(Path.Combine(_root, fileName), "");
+        Assert.Equal(expected, ChangeTaskService.DetectTechStackHint(_root));
+    }
+
+    [Fact]
+    public void DetectTechStackHint_RecognizesDotnetProject()
+    {
+        File.WriteAllText(Path.Combine(_root, "App.csproj"), "<Project />");
+        Assert.Equal("dotnet", ChangeTaskService.DetectTechStackHint(_root));
+    }
 }
 
 public sealed class ChangeTaskServiceRoleSelectionTests
