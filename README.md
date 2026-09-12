@@ -4,7 +4,7 @@ AITeam is a Windows-oriented local orchestration tool for coordinating multiple 
 
 ## Current status
 
-The repository currently preserves the working PowerShell/WinForms prototype while the next phase moves toward a portable Windows executable.
+The portable Windows executable (`src/AITeam.App`) is now the primary implementation: it runs the full inquiry/change-task pipeline described below. The original PowerShell/WinForms prototype under `prototype/` is kept only for historical reference and is no longer the operational path.
 
 ## Current AI roles
 
@@ -29,8 +29,4 @@ Runtime data, credentials, provider states, and managed repositories are not com
 
 ## Portable Windows EXE development
 
-The portable EXE rewrite starts at `v0.2.0-alpha.1`.
-
-The first alpha intentionally runs side-by-side with the existing PowerShell prototype. It validates the native executable shell, project-registry compatibility, provider health checks, hidden subprocess execution, and GitHub Actions self-contained Windows publishing before any source-writing task pipeline is moved into the EXE.
-
-See `docs/EXE_MIGRATION_PLAN.md`.
+The portable EXE rewrite started at `v0.2.0-alpha.1` and has, as of `v0.5.0`, absorbed the full guarded change-task pipeline (Scout → Plan Gate → Implement → Verify → Challenge → Final Review → Repair → version/commit/tag/push). See `docs/EXE_MIGRATION_PLAN.md` for the phased history and `docs/V0.4.0.md` / `docs/V0.5.0.md` for what shipped in each release.

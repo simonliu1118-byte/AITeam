@@ -86,7 +86,7 @@ public sealed class ChangeTaskService
                 throw new DirectoryNotFoundException($"隔離工作區內找不到專案目錄：{project.RepoSubpath}");
 
             var scout = Pick(available, ProviderId.Antigravity, ProviderId.Codex, ProviderId.Claude);
-            progress($"{FriendlyProvider(scout)}：Scout / evidence…");
+            progress($"{scout.ToFriendlyName()}：Scout / evidence…");
             var scoutReport = await RunReadOnlyAsync(
                 scout,
                 workingDirectory,
@@ -94,7 +94,7 @@ public sealed class ChangeTaskService
                 cancellationToken);
 
             var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
-            progress($"{FriendlyProvider(planner)}：Plan Gate / risk…");
+            progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
             var plan = await RunReadOnlyAsync(
                 planner,
                 workingDirectory,
@@ -106,7 +106,7 @@ public sealed class ChangeTaskService
             progress($"Plan Gate：Risk={risk}，Version={bump}");
 
             var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
-            progress($"{FriendlyProvider(implementer)}：開始實作與測試…");
+            progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
             await RunWriteAsync(
                 implementer,
                 workingDirectory,
@@ -132,14 +132,14 @@ public sealed class ChangeTaskService
             for (var round = 0; round <= 3; round++)
             {
                 var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
-                progress($"{FriendlyProvider(challengeProvider)}：獨立 Challenge…");
+                progress($"{challengeProvider.ToFriendlyName()}：獨立 Challenge…");
                 var challenge = await RunReadOnlyAsync(
                     challengeProvider,
                     workingDirectory,
                     BuildChallengePrompt(request, plan, diff),
                     cancellationToken);
 
-                progress($"{FriendlyProvider(finalProvider)}：Final Review…");
+                progress($"{finalProvider.ToFriendlyName()}：Final Review…");
                 finalReview = await RunReadOnlyAsync(
                     finalProvider,
                     workingDirectory,
@@ -158,7 +158,7 @@ public sealed class ChangeTaskService
                 var repairer = available.Contains(implementer)
                     ? implementer
                     : Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
-                progress($"Final Review 要求修正；{FriendlyProvider(repairer)} 進行第 {round + 1} 輪 Repair…");
+                progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
                 await RunWriteAsync(
                     repairer,
                     workingDirectory,
@@ -311,7 +311,7 @@ public sealed class ChangeTaskService
     {
         var result = await RunProviderAsync(provider, workingDirectory, prompt, true, cancellationToken);
         if (string.IsNullOrWhiteSpace(result))
-            throw new InvalidOperationException($"{FriendlyProvider(provider)} 沒有回傳實作結果。");
+            throw new InvalidOperationException($"{provider.ToFriendlyName()} 沒有回傳實作結果。");
     }
 
     private async Task<string> RunProviderAsync(
@@ -584,12 +584,4 @@ Make the required edits and run relevant tests. Do not commit, tag, push, merge,
         var value = Regex.Replace(text, "\\s+", " ").Trim();
         return value.Length <= max ? value : value[..max].TrimEnd();
     }
-
-    private static string FriendlyProvider(ProviderId provider) => provider switch
-    {
-        ProviderId.Codex => "GPT / Codex",
-        ProviderId.Claude => "Claude",
-        ProviderId.Antigravity => "Gemini / Antigravity",
-        _ => provider.ToString()
-    };
 }
