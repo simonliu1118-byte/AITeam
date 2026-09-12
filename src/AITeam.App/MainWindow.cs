@@ -53,6 +53,7 @@ public sealed class MainWindow : Form
         BuildUi();
         LoadProjects();
 
+        Shown += (_, _) => ForceLayoutRefreshAfterDpiScale();
         Shown += async (_, _) => await RecheckProvidersAsync();
         FormClosing += OnFormClosing;
     }
@@ -620,6 +621,18 @@ public sealed class MainWindow : Form
         _sendButton.Enabled = canSend;
         _sendButton.BackColor = canSend ? Accent : Color.FromArgb(181, 190, 200);
         _sendButton.Cursor = canSend ? Cursors.Hand : Cursors.Default;
+    }
+
+    private void ForceLayoutRefreshAfterDpiScale()
+    {
+        // On PerMonitorV2-aware displays with DPI scaling other than 100%, the very first
+        // layout pass can settle at slightly wrong bounds before Windows finishes applying
+        // the real DPI scale, leaving custom-painted card borders clipped on the right edge
+        // until something forces a full re-layout (e.g. maximizing). Nudging the size by a
+        // pixel and back forces that re-layout once the window's final bounds are known.
+        var size = Size;
+        Size = new Size(size.Width + 1, size.Height);
+        Size = size;
     }
 
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
