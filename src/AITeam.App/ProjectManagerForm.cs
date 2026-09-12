@@ -433,7 +433,7 @@ public sealed class ProjectManagerForm : Form
         SetBusy(true, "儲存中…");
         try
         {
-            var branch = await _git.SafeSyncAsync(_snapshot.RepoPath, _cts.Token);
+            var branch = await _git.SafeSyncAsync(_snapshot.RepoPath, _editing?.DefaultBranch, _cts.Token);
             var subpath = _selectedSubpath.Trim('/');
             var fullPath = string.IsNullOrWhiteSpace(subpath)
                 ? _snapshot.RepoPath
