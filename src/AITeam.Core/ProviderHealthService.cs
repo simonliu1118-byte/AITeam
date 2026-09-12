@@ -6,9 +6,9 @@ namespace AITeam.Services;
 public sealed class ProviderHealthService
 {
     private readonly string _runtimeRoot;
-    private readonly ProcessRunner _runner;
+    private readonly IProcessRunner _runner;
 
-    public ProviderHealthService(string runtimeRoot, ProcessRunner runner)
+    public ProviderHealthService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
         _runner = runner;
