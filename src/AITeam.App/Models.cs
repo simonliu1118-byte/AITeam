@@ -65,6 +65,17 @@ public enum ProviderId
     Antigravity
 }
 
+public static class ProviderIdExtensions
+{
+    public static string ToFriendlyName(this ProviderId provider) => provider switch
+    {
+        ProviderId.Codex => "GPT / Codex",
+        ProviderId.Claude => "Claude",
+        ProviderId.Antigravity => "Gemini / Antigravity",
+        _ => provider.ToString()
+    };
+}
+
 public enum ProviderHealthState
 {
     Unknown,
@@ -75,6 +86,22 @@ public enum ProviderHealthState
     TemporaryError,
     Error,
     Missing
+}
+
+public static class ProviderHealthStateExtensions
+{
+    public static string ToFriendlyName(this ProviderHealthState state) => state switch
+    {
+        ProviderHealthState.Unknown => "待檢查",
+        ProviderHealthState.Checking => "檢測中",
+        ProviderHealthState.Online => "上線",
+        ProviderHealthState.Quota => "超過限額",
+        ProviderHealthState.AuthenticationRequired => "需要重新登入",
+        ProviderHealthState.TemporaryError => "暫時異常",
+        ProviderHealthState.Error => "錯誤",
+        ProviderHealthState.Missing => "CLI 未安裝",
+        _ => state.ToString()
+    };
 }
 
 public sealed record ProviderHealth(
