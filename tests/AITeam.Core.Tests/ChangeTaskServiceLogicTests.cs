@@ -72,6 +72,25 @@ public sealed class ChangeTaskServiceLogicTests
 
         Assert.Null(reason);
     }
+
+    [Theory]
+    [InlineData("AITeamPlanStatus: NEEDS_INPUT\n這裡有兩種做法，你想要哪一種？", true)]
+    [InlineData("AITeamPlanStatus: READY\nAITeamRisk: NORMAL\nAITeamVersionBump: MINOR\n計畫內容。", false)]
+    [InlineData("沒有任何狀態標記", false)]
+    public void IsPlanGateNeedsInput_ReadsDeclaredStatus(string reply, bool expected)
+    {
+        Assert.Equal(expected, ChangeTaskService.IsPlanGateNeedsInput(reply));
+    }
+
+    [Fact]
+    public void ExtractPlanGateBody_StripsOnlyTheStatusLine()
+    {
+        var reply = "AITeamPlanStatus: READY\r\nAITeamRisk: NORMAL\r\nAITeamVersionBump: MINOR\r\n計畫內容。";
+
+        var body = ChangeTaskService.ExtractPlanGateBody(reply);
+
+        Assert.Equal("AITeamRisk: NORMAL" + Environment.NewLine + "AITeamVersionBump: MINOR" + Environment.NewLine + "計畫內容。", body);
+    }
 }
 
 public sealed class ChangeTaskServiceRoleSelectionTests

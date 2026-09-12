@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AITeam.Models;
@@ -18,6 +19,23 @@ public enum VersionBump
     Minor,
     Major
 }
+
+public enum PlanGateStage
+{
+    NeedsInput,
+    ReadyForConfirmation
+}
+
+public enum PlanGateAction
+{
+    Reply,
+    Finalize,
+    HandOff
+}
+
+public sealed record PlanGatePrompt(PlanGateStage Stage, string Body);
+
+public sealed record PlanGateResponse(PlanGateAction Action, string? Text = null);
 
 public sealed record ChangeTaskResult(
     ProviderId Implementer,
@@ -50,6 +68,7 @@ public sealed class ChangeTaskService
         ProjectEntry project,
         string request,
         IReadOnlyList<ProviderId> availableProviders,
+        Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
         CancellationToken cancellationToken)
     {
@@ -100,16 +119,34 @@ public sealed class ChangeTaskService
                 cancellationToken);
 
             var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
-            progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
-            var plan = await RunReadOnlyAsync(
-                planner,
-                workingDirectory,
-                BuildPlanPrompt(project, request, scoutReport),
-                cancellationToken);
-            var risk = ParseRisk(plan);
-            var bump = ParseVersionBump(plan);
-            if (bump == VersionBump.None) bump = VersionBump.Patch;
-            progress($"Plan Gate：Risk={risk}，Version={bump}");
+            var (plan, risk, bump) = await RunPlanGateDiscussionAsync(
+                project, request, scoutReport, planner, workingDirectory, askUser, progress, cancellationToken);
+
+            progress("計畫已定案；重新同步 GitHub 預設分支並重新鎖定基準版本…");
+            var refreshedBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
+            var refreshedBaseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
+            if (!refreshedBaseSha.Equals(baseSha, StringComparison.OrdinalIgnoreCase))
+            {
+                progress("偵測到討論期間 GitHub 預設分支已有新 commit，重新建立工作區以基於最新版本繼續…");
+                await _runner.RunAsync(
+                    "git",
+                    new[] { "worktree", "remove", "--force", worktreeRoot },
+                    project.RepoPath,
+                    null,
+                    TimeSpan.FromMinutes(1),
+                    cancellationToken);
+                baseSha = refreshedBaseSha;
+                defaultBranch = refreshedBranch;
+                var recreate = await _runner.RunAsync(
+                    "git",
+                    new[] { "worktree", "add", "-B", taskBranch, worktreeRoot, baseSha },
+                    project.RepoPath,
+                    null,
+                    TimeSpan.FromMinutes(2),
+                    cancellationToken);
+                if (recreate.ExitCode != 0)
+                    throw new InvalidOperationException("重新建立修改工作區失敗：" + FirstUsefulLine(recreate.StandardError, recreate.StandardOutput));
+            }
 
             var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
             progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
@@ -309,6 +346,84 @@ public sealed class ChangeTaskService
             throw new InvalidOperationException("實作階段沒有產生任何變更。");
     }
 
+    private async Task<(string Plan, ChangeRisk Risk, VersionBump Bump)> RunPlanGateDiscussionAsync(
+        ProjectEntry project,
+        string request,
+        string scoutReport,
+        ProviderId planner,
+        string workingDirectory,
+        Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
+        Action<string> progress,
+        CancellationToken cancellationToken)
+    {
+        var discussion = new StringBuilder();
+        var mustFinalize = false;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
+            var reply = await RunReadOnlyAsync(
+                planner,
+                workingDirectory,
+                BuildPlanPrompt(project, request, scoutReport, discussion.ToString(), mustFinalize),
+                cancellationToken);
+
+            if (!mustFinalize && IsPlanGateNeedsInput(reply))
+            {
+                var question = ExtractPlanGateBody(reply);
+                progress("Plan Gate 提出問題，等待使用者回覆…");
+                var response = await askUser(new PlanGatePrompt(PlanGateStage.NeedsInput, question), cancellationToken);
+
+                if (response.Action == PlanGateAction.HandOff)
+                {
+                    progress("使用者選擇交給 AI 全權判斷，Plan Gate 下一次回覆必須定案。");
+                    discussion.AppendLine("使用者：（選擇交給 AI 全權判斷，請直接定案，不要再提問）");
+                    mustFinalize = true;
+                }
+                else
+                {
+                    discussion.AppendLine("Plan Gate 提問：");
+                    discussion.AppendLine(question);
+                    discussion.AppendLine("使用者回覆：");
+                    discussion.AppendLine(response.Text ?? string.Empty);
+                }
+                continue;
+            }
+
+            var plan = ExtractPlanGateBody(reply);
+            var risk = ParseRisk(reply);
+            var bump = ParseVersionBump(reply);
+            if (bump == VersionBump.None) bump = VersionBump.Patch;
+
+            if (mustFinalize)
+            {
+                progress($"Plan Gate：Risk={risk}，Version={bump}（使用者已交給 AI 全權定案）");
+                return (plan, risk, bump);
+            }
+
+            progress("Plan Gate 認為計畫已可定案，等待使用者確認…");
+            var confirmation = await askUser(new PlanGatePrompt(PlanGateStage.ReadyForConfirmation, plan), cancellationToken);
+
+            if (confirmation.Action == PlanGateAction.Finalize)
+            {
+                progress($"Plan Gate：Risk={risk}，Version={bump}（使用者已確認定案）");
+                return (plan, risk, bump);
+            }
+
+            if (confirmation.Action == PlanGateAction.HandOff)
+            {
+                progress($"Plan Gate：Risk={risk}，Version={bump}（使用者交給 AI 全權判斷，採用目前計畫）");
+                return (plan, risk, bump);
+            }
+
+            discussion.AppendLine("Plan Gate 提出的定案計畫：");
+            discussion.AppendLine(plan);
+            discussion.AppendLine("使用者補充：");
+            discussion.AppendLine(confirmation.Text ?? string.Empty);
+        }
+    }
+
     private async Task<(string Version, string Tag)> BumpVersionAsync(
         ProjectEntry project,
         string workingDirectory,
@@ -464,18 +579,37 @@ Request: {request}
 Return concise Traditional Chinese with relevant file paths, symbols, current behavior, likely tests, and risks. Do not design an elaborate evidence pipeline; inspect the repo directly.
 """;
 
-    private static string BuildPlanPrompt(ProjectEntry project, string request, string scout) => $"""
-You are AITeam Plan Gate. Validate the Scout evidence against the repository, then finalize the implementation plan. Do not modify files.
+    private static string BuildPlanPrompt(ProjectEntry project, string request, string scout, string discussion, bool mustFinalize)
+    {
+        var discussionSection = discussion.Length == 0 ? "（尚無先前討論）" : discussion;
+        var decisionInstruction = mustFinalize
+            ? "The user has chosen to hand off the final decision to you. This reply MUST output AITeamPlanStatus: READY with a complete plan — do not ask any more questions."
+            : "If anything about the request is unclear or could materially change the implementation approach, output AITeamPlanStatus: NEEDS_INPUT and ask concrete question(s) instead of guessing — do not provide the full plan yet. Only output AITeamPlanStatus: READY once you are confident the plan is well-defined. There is no limit on how many rounds of questions you may ask.";
+
+        return $"""
+You are AITeam Plan Gate. Validate the Scout evidence against the repository, discuss with the user when needed, then finalize the implementation plan. Do not modify files.
 Project: {project.Name}
 Request: {request}
 Scout report:
 {scout}
 
-Your first two lines MUST be exactly in this format:
+Discussion with the user so far:
+{discussionSection}
+
+{decisionInstruction}
+
+Your first line MUST be exactly one of:
+AITeamPlanStatus: NEEDS_INPUT
+AITeamPlanStatus: READY
+
+If NEEDS_INPUT: after that first line, write your question(s) to the user in Traditional Chinese. Do not include AITeamRisk/AITeamVersionBump lines in this case.
+
+If READY: your next two lines MUST be exactly in this format:
 AITeamRisk: LOW|NORMAL|HIGH
 AITeamVersionBump: PATCH|MINOR|MAJOR|NONE
 Then provide a compact Traditional Chinese plan: files/symbols to change, behavior, acceptance criteria, tests/verification, and important exclusions. Use PATCH for small fixes, MINOR for functional changes, MAJOR only for a major production milestone.
 """;
+    }
 
     private static string BuildImplementPrompt(ProjectEntry project, string request, string scout, string plan) => $"""
 You are AITeam Implementer. Work only inside this isolated Git worktree and implement the approved request. You MAY edit files here.
@@ -595,6 +729,17 @@ Then give your rationale in Traditional Chinese.
         if (review.Contains("AITeamVersionBumpConfirm: MINOR", StringComparison.OrdinalIgnoreCase)) return VersionBump.Minor;
         if (review.Contains("AITeamVersionBumpConfirm: PATCH", StringComparison.OrdinalIgnoreCase)) return VersionBump.Patch;
         return VersionBump.None;
+    }
+
+    internal static bool IsPlanGateNeedsInput(string reply) =>
+        reply.TrimStart().StartsWith("AITeamPlanStatus: NEEDS_INPUT", StringComparison.OrdinalIgnoreCase);
+
+    internal static string ExtractPlanGateBody(string reply)
+    {
+        var lines = reply.Trim().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
+        if (lines.Count > 0 && lines[0].StartsWith("AITeamPlanStatus:", StringComparison.OrdinalIgnoreCase))
+            lines.RemoveAt(0);
+        return string.Join(Environment.NewLine, lines).Trim();
     }
 
     internal static string? ParseRepairDispute(string repairResult)

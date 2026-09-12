@@ -44,6 +44,7 @@ public sealed class InquiryService
         ProjectEntry project,
         string request,
         IReadOnlyList<ProviderId> candidates,
+        Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
         CancellationToken cancellationToken)
     {
@@ -102,6 +103,7 @@ public sealed class InquiryService
                                 project,
                                 request,
                                 candidates,
+                                askUser,
                                 progress,
                                 cancellationToken);
 
