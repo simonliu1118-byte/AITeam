@@ -1,11 +1,12 @@
-# AITeam Change Pipeline Redesign — Spec (draft, pending approval)
+# AITeam Change Pipeline Redesign — Spec (approved, implementing)
 
-This document is a design spec, not yet implemented. It consolidates the logic/flow
-review discussed with the project owner and the decisions made in that discussion.
-Nothing in this file changes behavior until it is implemented and merged version by
-version (see "建議的版本拆分" at the end).
+This document is a design spec. It consolidates the logic/flow review discussed with
+the project owner and the decisions made in that discussion. Nothing changes behavior
+by itself — each section is implemented and merged version by version per the
+sequencing at the end of this document; check `docs/V0.*.md` changelogs for what has
+actually shipped.
 
-Status: **草案，待確認**。確認沒問題後才會開始拆版本實作。
+Status: **已確認，逐版實作中**。Plan Gate 討論介面的視覺方向已用 mockup 跟專案負責人確認過，細節可在上線後依回饋調整。
 
 ## 設計原則（貫穿全文件）
 
