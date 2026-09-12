@@ -5,7 +5,7 @@ namespace AITeam;
 public sealed class RoundedCard : Panel
 {
     private int _radius = 10;
-    private Color _borderColor = Color.FromArgb(205, 212, 220);
+    private Color _borderColor = Color.FromArgb(190, 199, 210);
 
     public RoundedCard()
     {
@@ -17,31 +17,24 @@ public sealed class RoundedCard : Panel
     public int Radius
     {
         get => _radius;
-        set
-        {
-            _radius = Math.Max(0, value);
-            Invalidate();
-        }
+        set { _radius = Math.Max(0, value); Invalidate(); }
     }
 
     public Color BorderColor
     {
         get => _borderColor;
-        set
-        {
-            _borderColor = value;
-            Invalidate();
-        }
+        set { _borderColor = value; Invalidate(); }
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-
-        var rect = new RectangleF(1.25f, 1.25f, Math.Max(1, ClientSize.Width - 2.5f), Math.Max(1, ClientSize.Height - 2.5f));
+        var rect = new RectangleF(1.5f, 1.5f,
+            Math.Max(1, ClientSize.Width - 3.5f),
+            Math.Max(1, ClientSize.Height - 3.5f));
         using var path = CreateRoundedRectangle(rect, Radius);
-        using var pen = new Pen(BorderColor, 1.35f);
+        using var pen = new Pen(BorderColor, 1.5f);
         e.Graphics.DrawPath(pen, path);
     }
 
@@ -54,7 +47,6 @@ public sealed class RoundedCard : Panel
             path.CloseFigure();
             return path;
         }
-
         var d = radius * 2f;
         path.AddArc(rect.Left, rect.Top, d, d, 180, 90);
         path.AddArc(rect.Right - d, rect.Top, d, d, 270, 90);
