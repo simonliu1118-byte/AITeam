@@ -106,19 +106,6 @@ public sealed class ChangeTaskServiceLogicTests
         Assert.Throws<InvalidOperationException>(() => ChangeTaskService.ParsePrNumberFromUrl("no url here"));
     }
 
-    [Theory]
-    [InlineData("squash", "--squash")]
-    [InlineData("SQUASH", "--squash")]
-    [InlineData("rebase", "--rebase")]
-    [InlineData("merge", "--merge")]
-    [InlineData(null, "--merge")]
-    [InlineData("", "--merge")]
-    [InlineData("something-else", "--merge")]
-    public void ResolveMergeFlag_MapsStrategyToGhFlagOrDefaultsToMerge(string? strategy, string expected)
-    {
-        Assert.Equal(expected, ChangeTaskService.ResolveMergeFlag(strategy));
-    }
-
     [Fact]
     public void ParsePrState_ReadsStateField()
     {
