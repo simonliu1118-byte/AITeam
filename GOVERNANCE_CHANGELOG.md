@@ -1,5 +1,11 @@
 # AITeam Governance Changelog
 
+## 2.7.1 — 2026/09/13
+
+- AITeam Windows Build workflow 移除 `ready_for_review` 事件；Draft PR 從建立起即可正常驗收，切換 Ready 狀態不再額外重跑一次相同 Build／Test。
+- 保留 `opened`、`synchronize`、`reopened` 與 `workflow_dispatch`，完整對齊 Common Rules 2.4.0 的 PR 驗收模型。
+- 本次不修改共通規則本文、產品 source、VERSION／BUILD 或 Release 流程。
+
 ## 2.7.0 — 2026/09/13
 
 - 共通規則升級至 2.4.0，統一 Build／Test workflow 預設採 `pull_request` + `workflow_dispatch`。
