@@ -16,6 +16,8 @@ public sealed class TaskHistoryForm : Form
     private static readonly Color SecondaryText = Color.FromArgb(104, 113, 123);
     private static readonly Color Accent = Color.FromArgb(43, 108, 176);
     private static readonly Color SelectedItemBackground = Color.FromArgb(234, 241, 248);
+    private static readonly Color Danger = Color.FromArgb(176, 54, 54);
+    private static readonly Color DangerBorder = Color.FromArgb(227, 195, 195);
 
     private static readonly Font SubjectFont = new("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
     private static readonly Font MetaFont = new("Microsoft JhengHei UI", 8.5F);
@@ -26,12 +28,15 @@ public sealed class TaskHistoryForm : Form
     private readonly Label _detailMeta = new();
     private readonly TextBox _resultBox = new();
     private readonly RichTextBox _logBox = new();
+    private readonly LinkFoldingLog _logView;
+    private readonly Button _deleteButton = new();
 
     private IReadOnlyList<TaskHistoryEntry> _entries = Array.Empty<TaskHistoryEntry>();
 
     public TaskHistoryForm(TaskHistoryService history)
     {
         _history = history;
+        _logView = new LinkFoldingLog(_logBox);
 
         Text = "AITeam - 歷史任務";
         StartPosition = FormStartPosition.CenterParent;
@@ -70,20 +75,28 @@ public sealed class TaskHistoryForm : Form
             Margin = new Padding(0, 0, 0, 12)
         }, 0, 0);
 
-        var close = new Button
+        var actions = new TableLayoutPanel
         {
-            Text = "關閉",
-            AutoSize = false,
-            Size = new Size(90, 32),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.White,
-            ForeColor = PrimaryText,
             Anchor = AnchorStyles.Right,
+            AutoSize = true,
+            ColumnCount = 2,
             Margin = new Padding(0, 0, 2, 12)
         };
-        close.FlatAppearance.BorderColor = BorderColor;
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        ConfigureFlatButton(_deleteButton, "刪除這筆", 100);
+        _deleteButton.ForeColor = Danger;
+        _deleteButton.FlatAppearance.BorderColor = DangerBorder;
+        _deleteButton.Margin = new Padding(0, 0, 8, 0);
+        _deleteButton.Click += (_, _) => DeleteSelected();
+        actions.Controls.Add(_deleteButton, 0, 0);
+
+        var close = new Button();
+        ConfigureFlatButton(close, "關閉", 90);
         close.Click += (_, _) => Close();
-        shell.Controls.Add(close, 1, 0);
+        actions.Controls.Add(close, 1, 0);
+        shell.Controls.Add(actions, 1, 0);
 
         shell.Controls.Add(BuildListPanel(), 0, 1);
         shell.Controls.Add(BuildDetailPanel(), 1, 1);
@@ -203,7 +216,19 @@ public sealed class TaskHistoryForm : Form
         return wrapper;
     }
 
-    private void LoadHistory()
+    private static void ConfigureFlatButton(Button button, string text, int width)
+    {
+        button.Text = text;
+        button.AutoSize = false;
+        button.Size = new Size(width, 32);
+        button.FlatStyle = FlatStyle.Flat;
+        button.BackColor = Color.White;
+        button.ForeColor = PrimaryText;
+        button.FlatAppearance.BorderColor = BorderColor;
+        button.Margin = Padding.Empty;
+    }
+
+    private void LoadHistory(int preferredIndex = 0)
     {
         _entries = _history.Load();
         _list.Items.Clear();
@@ -211,11 +236,38 @@ public sealed class TaskHistoryForm : Form
 
         if (_entries.Count == 0)
         {
+            _deleteButton.Enabled = false;
             _detailTitle.Text = "還沒有任何歷史任務";
             _detailMeta.Text = "送出第一個任務之後，這裡就會留下紀錄。";
+            _resultBox.Text = "";
+            _logView.Clear();
             return;
         }
-        _list.SelectedIndex = 0;
+
+        _deleteButton.Enabled = true;
+        // 先清掉選取再指定，確保 SelectedIndexChanged 一定會觸發；
+        // 刪掉一筆之後索引數字可能沒變，不這樣做右邊會停在已經被刪掉的內容上。
+        _list.ClearSelected();
+        _list.SelectedIndex = Math.Clamp(preferredIndex, 0, _entries.Count - 1);
+    }
+
+    private void DeleteSelected()
+    {
+        if (_list.SelectedItem is not TaskHistoryEntry entry) return;
+
+        var subject = string.IsNullOrWhiteSpace(entry.Subject) ? entry.Request : entry.Subject;
+        var answer = MessageBox.Show(
+            $"確定要刪除這筆歷史任務？\r\n\r\n{subject}\r\n\r\n連同它的完整執行紀錄一起刪除，且無法復原。",
+            "刪除歷史任務",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes) return;
+
+        // 刪掉之後停在同一個位置，讓使用者可以連續刪除而不用每次重新找。
+        var index = _list.SelectedIndex;
+        _history.Delete(entry.Id);
+        LoadHistory(index);
     }
 
     private void ShowSelected()
@@ -229,9 +281,8 @@ public sealed class TaskHistoryForm : Form
         _resultBox.Text = string.IsNullOrWhiteSpace(entry.Result) ? "（沒有結果摘要。）" : entry.Result;
 
         // 完整 log 只在這時候才從檔案讀進來。
-        _logBox.Text = _history.LoadLog(entry.Id);
-        _logBox.SelectionStart = 0;
-        _logBox.ScrollToCaret();
+        _logView.SetText(_history.LoadLog(entry.Id));
+        _logView.ScrollToTop();
     }
 
     private void DrawHistoryItem(object? sender, DrawItemEventArgs e)

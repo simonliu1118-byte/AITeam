@@ -25,6 +25,7 @@ public sealed class MainWindow : Form
     private readonly TextBox _requestBox = new();
     private readonly TextBox _currentTaskBox = new();
     private readonly RichTextBox _outputBox = new();
+    private readonly LinkFoldingLog _outputLog;
     private readonly Button _recheckButton = new();
     private readonly Button _sendButton = new();
     private readonly Button _projectButton = new();
@@ -50,6 +51,7 @@ public sealed class MainWindow : Form
     public MainWindow(string runtimeRoot)
     {
         _runtimeRoot = runtimeRoot;
+        _outputLog = new LinkFoldingLog(_outputBox);
         var runner = new ProcessRunner();
         _projectRegistry = new ProjectRegistryService(runtimeRoot);
         _providerHealth = new ProviderHealthService(runtimeRoot, runner);
@@ -276,6 +278,8 @@ public sealed class MainWindow : Form
         _projectBox.Font = Font;
         _projectBox.Dock = DockStyle.Fill;
         _projectBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        // 專案多的時候不要只露出前幾個，展開就一次看到（超過再捲）。
+        _projectBox.MaxDropDownItems = 20;
         _projectBox.Margin = new Padding(0, 0, 10, 0);
         _projectBox.SelectedIndexChanged += (_, _) => UpdateProjectInfo();
 
@@ -379,11 +383,6 @@ public sealed class MainWindow : Form
     private void AddProviderRow(TableLayoutPanel grid, int row, ProviderId provider, string name)
     {
         var status = new ProviderStatusRow(provider, name);
-        status.SessionEnabledChanged += (_, enabled) =>
-        {
-            if (!enabled) status.SetManualDisabled();
-            else status.SetHealth(new ProviderHealth(provider, ProviderHealthState.Unknown, "待重新檢查", TimeSpan.Zero));
-        };
         _providerCards[provider] = status;
         status.AddTo(grid, row);
     }
@@ -602,11 +601,12 @@ public sealed class MainWindow : Form
     {
         var selected = _projectBox.SelectedItem as ProjectEntry;
         using var form = new ProjectManagerForm(_runtimeRoot, _projectRegistry, selected);
-        if (form.ShowDialog(this) == DialogResult.OK)
-        {
-            LoadProjects(form.SavedProjectName ?? selected?.Name);
-            AppendLog("專案登錄已更新。");
-        }
+        var result = form.ShowDialog(this);
+
+        // 不論是按「完成」還是直接關視窗，都重新載入一次。之前只在 DialogResult.OK
+        // 時才重載，使用者用右上角 X 關掉時新增的專案就不會出現在上面的下拉選單裡。
+        LoadProjects(form.SavedProjectName ?? selected?.Name);
+        if (result == DialogResult.OK) AppendLog("專案登錄已更新。");
     }
 
     private void UpdateProjectInfo()
@@ -623,14 +623,11 @@ public sealed class MainWindow : Form
     {
         _recheckButton.Enabled = false;
         AppendLog("開始檢查三個 AI...");
+        // 三家都檢查，包含這一輪沒有要用的。狀態是狀態、用不用是用不用，兩件事分開。
         foreach (var provider in Enum.GetValues<ProviderId>())
-        {
-            if (_providerCards[provider].SessionEnabled)
-                _providerCards[provider].SetHealth(ProviderHealth.Checking(provider));
-        }
+            _providerCards[provider].SetHealth(ProviderHealth.Checking(provider));
 
         var tasks = Enum.GetValues<ProviderId>()
-            .Where(p => _providerCards[p].SessionEnabled)
             .ToDictionary(p => p, p => _providerHealth.ProbeAsync(p, _lifetimeCts.Token));
 
         foreach (var item in tasks)
@@ -664,7 +661,7 @@ public sealed class MainWindow : Form
         _taskLog.Clear();
         StartTaskProgress();
         SetTaskRunning(true);
-        _outputBox.Clear();
+        _outputLog.Clear();
 
         try
         {
@@ -930,15 +927,12 @@ public sealed class MainWindow : Form
             BeginInvoke(new Action<string>(AppendLog), text);
             return;
         }
-        _outputBox.SelectionStart = _outputBox.TextLength;
-        _outputBox.SelectionLength = 0;
-        _outputBox.SelectionFont = _outputBox.Font;
         var line = text.Length == 0 ? Environment.NewLine : $"[{DateTime.Now:HH:mm:ss}] {text}\r\n";
-        _outputBox.AppendText(line);
+        // 畫面上把參照折成檔名（完整路徑用 tooltip 顯示），但存進歷史紀錄的是原文，
+        // 路徑不會因為畫面好看而被丟掉。
+        _outputLog.Append(line);
         _taskLog.Append(line);
-
-        _outputBox.SelectionStart = _outputBox.TextLength;
-        _outputBox.ScrollToCaret();
+        _outputLog.ScrollToEnd();
     }
 
     private void OpenTaskHistory()
