@@ -41,6 +41,12 @@ public sealed class ProjectManagerForm : Form
     private bool _changed;
     private bool _suppressSelection;
 
+    // 拖曳排序用：_dragIndex 是抓起來的那一筆，_dropIndex 是「會插在第幾個位置前面」
+    // （等於項目數時代表放到最後面）。
+    private int _dragIndex = -1;
+    private int _dropIndex = -1;
+    private Point _dragOrigin;
+
     public string? SavedProjectName { get; private set; }
 
     public ProjectManagerForm(string runtimeRoot, ProjectRegistryService registry, ProjectEntry? selectedProject)
@@ -157,6 +163,13 @@ public sealed class ProjectManagerForm : Form
             if (_suppressSelection) return;
             if (_projectList.SelectedItem is ProjectEntry entry) LoadProject(entry);
         };
+
+        _projectList.AllowDrop = true;
+        _projectList.MouseDown += OnListMouseDown;
+        _projectList.MouseMove += OnListMouseMove;
+        _projectList.DragOver += OnListDragOver;
+        _projectList.DragDrop += OnListDragDrop;
+        _projectList.DragLeave += (_, _) => SetDropIndex(-1);
         panel.Controls.Add(_projectList, 0, 1);
 
         var foot = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
@@ -165,7 +178,7 @@ public sealed class ProjectManagerForm : Form
         foot.Controls.Add(divider, 0, 0);
         foot.Controls.Add(new Label
         {
-            Text = "新增專案不會覆蓋既有專案；選取清單項目後才會進入編輯模式。",
+            Text = "直接拖曳卡片可調整順序，主畫面的下拉選單會跟著同一個順序。選取清單項目後才會進入編輯模式。",
             AutoSize = true,
             MaximumSize = new Size(195, 0),
             Font = new Font("Microsoft JhengHei UI", 8.5F),
@@ -203,6 +216,104 @@ public sealed class ProjectManagerForm : Form
             textBounds,
             selected ? Accent : PrimaryText,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+
+        DrawDropIndicator(e);
+    }
+
+    /// <summary>拖曳時畫一條線，讓使用者看得到放開會插在哪裡。</summary>
+    private void DrawDropIndicator(DrawItemEventArgs e)
+    {
+        if (_dropIndex < 0) return;
+
+        int y;
+        if (_dropIndex == e.Index) y = e.Bounds.Top + 1;
+        else if (_dropIndex >= _projectList.Items.Count && e.Index == _projectList.Items.Count - 1) y = e.Bounds.Bottom - 2;
+        else return;
+
+        using var pen = new Pen(Accent, 2f);
+        e.Graphics.DrawLine(pen, e.Bounds.Left + 4, y, e.Bounds.Right - 6, y);
+    }
+
+    private void OnListMouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        _dragIndex = _projectList.IndexFromPoint(e.Location);
+        _dragOrigin = e.Location;
+    }
+
+    private void OnListMouseMove(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || _dragIndex < 0) return;
+
+        // 要移動超過系統的拖曳判定距離才算拖曳，否則單純點選也會被當成拖曳。
+        var drag = SystemInformation.DragSize;
+        if (Math.Abs(e.X - _dragOrigin.X) < drag.Width && Math.Abs(e.Y - _dragOrigin.Y) < drag.Height) return;
+
+        _projectList.DoDragDrop(_dragIndex, DragDropEffects.Move);
+    }
+
+    private void OnListDragOver(object? sender, DragEventArgs e)
+    {
+        if (_dragIndex < 0) { e.Effect = DragDropEffects.None; return; }
+
+        e.Effect = DragDropEffects.Move;
+        SetDropIndex(InsertionIndexAt(_projectList.PointToClient(new Point(e.X, e.Y))));
+    }
+
+    private void OnListDragDrop(object? sender, DragEventArgs e)
+    {
+        var from = _dragIndex;
+        var to = _dropIndex;
+        _dragIndex = -1;
+        SetDropIndex(-1);
+        MoveProject(from, to);
+    }
+
+    private int InsertionIndexAt(Point point)
+    {
+        if (_projectList.Items.Count == 0) return 0;
+        if (point.Y <= 0) return 0;
+
+        var index = _projectList.IndexFromPoint(point);
+        if (index < 0) return _projectList.Items.Count;
+
+        var bounds = _projectList.GetItemRectangle(index);
+        return point.Y > bounds.Top + bounds.Height / 2 ? index + 1 : index;
+    }
+
+    private void SetDropIndex(int index)
+    {
+        if (_dropIndex == index) return;
+        _dropIndex = index;
+        _projectList.Invalidate();
+    }
+
+    private void MoveProject(int from, int to)
+    {
+        if (from < 0 || from >= _projectList.Items.Count || to < 0) return;
+
+        // 先移除再插入，所以往後搬的時候目標位置要往前移一格。
+        if (to > from) to--;
+        to = Math.Clamp(to, 0, _projectList.Items.Count - 1);
+        if (to == from) return;
+
+        var items = _projectList.Items.Cast<ProjectEntry>().ToList();
+        var moved = items[from];
+        items.RemoveAt(from);
+        items.Insert(to, moved);
+
+        try
+        {
+            _registry.Reorder(items.Select(p => p.Name).ToList());
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "調整順序失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        _changed = true;
+        RefreshProjectList(moved.Name);
     }
 
     private static GraphicsPath CreateRoundedPath(Rectangle rect, int radius)

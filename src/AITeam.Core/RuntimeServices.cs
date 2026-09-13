@@ -73,11 +73,14 @@ public sealed class ProjectRegistryService
 
     public string? RegistryPath { get; private set; }
 
+    /// <summary>
+    /// 專案順序就是檔案裡的順序，不再自動照名稱排序——使用者可以在專案管理直接拖曳調整，
+    /// 主畫面的下拉選單也會跟著同一個順序。
+    /// </summary>
     public IReadOnlyList<ProjectEntry> Load()
     {
         return LoadDocument().Projects
             .Where(p => p.Active is not false)
-            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -123,6 +126,29 @@ public sealed class ProjectRegistryService
         if (conflict) throw new InvalidOperationException($"專案名稱「{entry.Name}」已被其他專案使用。");
 
         document.Projects[index] = entry;
+        Save(document);
+    }
+
+    /// <summary>
+    /// 依照傳入的名稱順序重新排列登錄檔。清單裡沒提到的專案（例如停用中的）會保留在最後面，
+    /// 不會因為排序而不見。
+    /// </summary>
+    public void Reorder(IReadOnlyList<string> namesInOrder)
+    {
+        var document = LoadDocument();
+        var remaining = document.Projects.ToList();
+        var ordered = new List<ProjectEntry>(remaining.Count);
+
+        foreach (var name in namesInOrder)
+        {
+            var index = remaining.FindIndex(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (index < 0) continue;
+            ordered.Add(remaining[index]);
+            remaining.RemoveAt(index);
+        }
+
+        ordered.AddRange(remaining);
+        document.Projects = ordered;
         Save(document);
     }
 

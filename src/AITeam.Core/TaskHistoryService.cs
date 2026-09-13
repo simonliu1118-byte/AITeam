@@ -124,6 +124,27 @@ public sealed class TaskHistoryService
         if (tasks.Count > MaxEntries) tasks = tasks.Take(MaxEntries).ToList();
 
         File.WriteAllText(LogPathFor(entry.Id), fullLog);
+        WriteIndex(tasks);
+    }
+
+    /// <summary>刪掉一筆歷史任務：索引與它的 log 檔一起清掉。</summary>
+    public void Delete(string id)
+    {
+        var tasks = Load().Where(t => !string.Equals(t.Id, id, StringComparison.Ordinal)).ToList();
+        TryDeleteLog(id);
+        WriteIndex(tasks);
+    }
+
+    /// <summary>清掉全部歷史任務，含所有 log 檔。</summary>
+    public void DeleteAll()
+    {
+        foreach (var entry in Load()) TryDeleteLog(entry.Id);
+        WriteIndex(new List<TaskHistoryEntry>());
+    }
+
+    private void WriteIndex(List<TaskHistoryEntry> tasks)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
         File.WriteAllText(
             _indexPath,
             JsonSerializer.Serialize(new TaskHistoryDocument { Tasks = tasks }, WriteOptions));

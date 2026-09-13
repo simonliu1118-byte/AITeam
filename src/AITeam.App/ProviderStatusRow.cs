@@ -14,6 +14,9 @@ public sealed class ProviderStatusRow
     private readonly AutoFitLabel _detailLabel = new();
     private readonly CheckBox _enabledCheck = new();
 
+    // 最後一次真正檢查到的狀態。使用者勾不勾「本次使用」都不會動到它。
+    private ProviderHealth _health;
+
     public ProviderStatusRow(ProviderId provider, string name)
     {
         Provider = provider;
@@ -27,7 +30,9 @@ public sealed class ProviderStatusRow
 
         _lamp.Size = new Size(14, 14);
         _lamp.Anchor = AnchorStyles.Left;
-        _lamp.Margin = new Padding(0, 12, 8, 9);
+        // 上下邊界要對稱，TableLayoutPanel 才會把燈號真正置中；左右不等會讓燈號比
+        // 旁邊的文字高或低一點點，看起來就沒對齊。
+        _lamp.Margin = new Padding(0, 9, 8, 9);
 
         _statusLabel.AutoSize = true;
         _statusLabel.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
@@ -50,14 +55,21 @@ public sealed class ProviderStatusRow
         _enabledCheck.AutoSize = true;
         _enabledCheck.Anchor = AnchorStyles.Right;
         _enabledCheck.Margin = new Padding(0, 9, 0, 9);
-        _enabledCheck.CheckedChanged += (_, _) => SessionEnabledChanged?.Invoke(this, _enabledCheck.Checked);
+        _enabledCheck.CheckedChanged += (_, _) =>
+        {
+            // 勾不勾只決定這一輪要不要派工，跟這家 AI 的狀態無關，所以不重畫燈號、
+            // 也不把狀態打回「待檢查」，只換說明文字。
+            Render();
+            SessionEnabledChanged?.Invoke(this, _enabledCheck.Checked);
+        };
 
-        SetHealth(new ProviderHealth(provider, ProviderHealthState.Unknown, "待檢查", TimeSpan.Zero));
+        _health = new ProviderHealth(provider, ProviderHealthState.Unknown, "待檢查", TimeSpan.Zero);
+        Render();
     }
 
     public ProviderId Provider { get; }
     public bool SessionEnabled => _enabledCheck.Checked;
-    public ProviderHealthState State { get; private set; } = ProviderHealthState.Unknown;
+    public ProviderHealthState State => _health.State;
     public event EventHandler<bool>? SessionEnabledChanged;
 
     public void AddTo(TableLayoutPanel grid, int row)
@@ -69,29 +81,19 @@ public sealed class ProviderStatusRow
         grid.Controls.Add(_enabledCheck, 4, row);
     }
 
-    public void SetManualDisabled()
-    {
-        State = ProviderHealthState.Unknown;
-        _statusLabel.Text = "本次停用";
-        _detailLabel.Text = "重新勾選後可再次檢查";
-        _lamp.DotColor = Color.FromArgb(145, 153, 163);
-        _statusLabel.ForeColor = Color.FromArgb(110, 117, 126);
-    }
-
     public void SetHealth(ProviderHealth health)
     {
-        if (!SessionEnabled)
-        {
-            SetManualDisabled();
-            return;
-        }
+        _health = health;
+        Render();
+    }
 
-        State = health.State;
-        var presentation = GetPresentation(health);
+    private void Render()
+    {
+        var presentation = GetPresentation(_health);
         _lamp.DotColor = presentation.Color;
         _statusLabel.Text = presentation.Status;
         _statusLabel.ForeColor = presentation.Color;
-        _detailLabel.Text = presentation.Detail;
+        _detailLabel.Text = SessionEnabled ? presentation.Detail : "本次不使用，狀態仍會持續更新";
     }
 
     private static ProviderPresentation GetPresentation(ProviderHealth health) =>

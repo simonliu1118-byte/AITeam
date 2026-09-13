@@ -71,6 +71,33 @@ public sealed class TaskHistoryServiceTests : IDisposable
         Assert.Contains("沒有保留完整執行紀錄", history.LoadLog("task-0"));
     }
 
+    [Fact]
+    public void DeletedTask_DisappearsFromTheIndex_AndItsLogIsRemoved()
+    {
+        var history = new TaskHistoryService(_root);
+        history.Save(NewEntry("keep", "留下來"), "log A");
+        history.Save(NewEntry("drop", "刪掉"), "log B");
+
+        history.Delete("drop");
+
+        Assert.Equal(new[] { "留下來" }, history.Load().Select(x => x.Subject));
+        Assert.Contains("沒有保留完整執行紀錄", history.LoadLog("drop"));
+        Assert.Contains("log A", history.LoadLog("keep"));
+    }
+
+    [Fact]
+    public void DeleteAll_ClearsEverything()
+    {
+        var history = new TaskHistoryService(_root);
+        history.Save(NewEntry("a", "一"), "log");
+        history.Save(NewEntry("b", "二"), "log");
+
+        history.DeleteAll();
+
+        Assert.Empty(history.Load());
+        Assert.Contains("沒有保留完整執行紀錄", history.LoadLog("a"));
+    }
+
     private static TaskHistoryEntry NewEntry(string id, string subject) => new()
     {
         Id = id,
