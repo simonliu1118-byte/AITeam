@@ -15,6 +15,8 @@
   該版本真正完成時才建立一次，因此不需要每個 Build 都有自己的 tag。
 - 日常合併（PR 驗證）產生的仍是短期 Actions Artifact，不建立正式 tag／
   Release；需要正式留存的版本才手動觸發 `release-windows.yml`。
+- 共通規則同步不再依賴每日 Actions 排程：AITeam 母本一旦變更，同一輪治理工作即直接以 Git／GitHub API／治理 PR 同步 `CYapps` 與 `CYapps_pvt`；Actions sync workflow 與 Governance Check 僅作第二道保險。
+- Actions 額度不足或暫時不可用時，任何 AI 接手下游 repo 前仍必須直接比對 `COMMON_RULES_VERSION` 與 AITeam `main`，發現落後先同步再開發。
 
 ## 2.0.0 — 2026/09/13
 
