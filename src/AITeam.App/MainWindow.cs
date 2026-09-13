@@ -28,6 +28,7 @@ public sealed class MainWindow : Form
     private readonly LinkFoldingLog _outputLog;
     private readonly Button _recheckButton = new();
     private readonly Button _sendButton = new();
+    private readonly Button _stopButton = new();
     private readonly Button _projectButton = new();
     private readonly Button _historyButton = new();
     private readonly StatusBadge _modeBadge = new();
@@ -40,6 +41,8 @@ public sealed class MainWindow : Form
 
     private IReadOnlyList<ProjectEntry> _projects = Array.Empty<ProjectEntry>();
     private bool _taskRunning;
+    // 這一次任務專用的取消來源；接在程式生命週期底下，關程式時也會一起取消。
+    private CancellationTokenSource? _taskCts;
     private DateTime? _taskStartedAt;
     private DateTime? _stageStartedAt;
     private TaskProgress? _currentProgress;
@@ -219,14 +222,15 @@ public sealed class MainWindow : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            ColumnCount = 2,
+            ColumnCount = 3,
             Margin = new Padding(0, 12, 2, 0)
         };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(new Label
         {
-            Text = "任務執行中仍可先輸入下一件；完成前「送出」會保持鎖定。",
+            Text = "任務執行中仍可先輸入下一件；執行中可按「停止」中止本次任務。",
             AutoSize = false,
             AutoEllipsis = true,
             Dock = DockStyle.Fill,
@@ -245,7 +249,20 @@ public sealed class MainWindow : Form
         _sendButton.Font = new Font("Microsoft JhengHei UI", 10.5F, FontStyle.Bold);
         _sendButton.Cursor = Cursors.Hand;
         _sendButton.Click += async (_, _) => await HandleSendAsync();
-        bottom.Controls.Add(_sendButton, 1, 0);
+
+        _stopButton.Text = "停止";
+        _stopButton.AutoSize = false;
+        _stopButton.Size = new Size(84, 42);
+        _stopButton.FlatStyle = FlatStyle.Flat;
+        _stopButton.BackColor = Color.White;
+        _stopButton.ForeColor = Color.FromArgb(176, 54, 54);
+        _stopButton.FlatAppearance.BorderColor = Color.FromArgb(227, 195, 195);
+        _stopButton.Font = new Font("Microsoft JhengHei UI", 10.5F, FontStyle.Bold);
+        _stopButton.Margin = new Padding(0, 0, 8, 0);
+        _stopButton.Click += (_, _) => StopCurrentTask();
+
+        bottom.Controls.Add(_stopButton, 1, 0);
+        bottom.Controls.Add(_sendButton, 2, 0);
         layout.Controls.Add(bottom, 0, 5);
         RefreshSendButton();
     }
@@ -653,6 +670,9 @@ public sealed class MainWindow : Form
             return;
         }
 
+        var candidates = GetProviderCandidates();
+        if (!PassesPreflight(project, candidates.Count)) return;
+
         var request = _requestBox.Text.Trim();
         _currentTaskBox.Text = request;
         _requestBox.Clear();
@@ -662,10 +682,13 @@ public sealed class MainWindow : Form
         StartTaskProgress();
         SetTaskRunning(true);
         _outputLog.Clear();
+        LogPreflightWarnings(project, candidates.Count);
+
+        _taskCts?.Dispose();
+        _taskCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
 
         try
         {
-            var candidates = GetProviderCandidates();
             var result = await _inquiryService.RunAsync(
                 project,
                 request,
@@ -673,7 +696,7 @@ public sealed class MainWindow : Form
                 AskPlanGateAsync,
                 text => AppendLog(text),
                 ReportStage,
-                _lifetimeCts.Token);
+                _taskCts.Token);
 
             if (result.Intent == RequestIntent.Change && result.Change is { } change)
             {
@@ -704,6 +727,34 @@ public sealed class MainWindow : Form
         finally
         {
             if (!IsDisposed) SetTaskRunning(false);
+        }
+    }
+
+    /// <summary>
+    /// 送出前先檢查。有擋下來的問題就直接說清楚並停住，不要等到 AI 額度燒掉一半才發現。
+    /// </summary>
+    private bool PassesPreflight(ProjectEntry project, int onlineProviderCount)
+    {
+        var blockers = ProjectPreflight.Inspect(project, onlineProviderCount)
+            .Where(issue => issue.Severity == PreflightSeverity.Blocker)
+            .ToList();
+        if (blockers.Count == 0) return true;
+
+        MessageBox.Show(
+            "這次任務無法送出：\r\n\r\n" +
+            string.Join("\r\n\r\n", blockers.Select(issue => $"● {issue.Title}\r\n　 {issue.Detail}")),
+            "送出前檢查",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+        return false;
+    }
+
+    private void LogPreflightWarnings(ProjectEntry project, int onlineProviderCount)
+    {
+        foreach (var issue in ProjectPreflight.Inspect(project, onlineProviderCount))
+        {
+            if (issue.Severity != PreflightSeverity.Warning) continue;
+            AppendLog($"⚠️ {issue.Title}：{issue.Detail}");
         }
     }
 
@@ -889,7 +940,37 @@ public sealed class MainWindow : Form
         _sendButton.Text = running ? "執行中…" : "送出";
         _projectButton.Enabled = !running;
         _projectBox.Enabled = !running;
+        _stopButton.Enabled = running;
+        _stopButton.Cursor = running ? Cursors.Hand : Cursors.Default;
         RefreshSendButton();
+    }
+
+    /// <summary>
+    /// 中止目前任務。取消會一路傳到底層，連正在跑的 CLI 子行程都會被結束，
+    /// 所以按下去是真的停，不是只把畫面切回待命。
+    /// </summary>
+    private void StopCurrentTask()
+    {
+        if (!_taskRunning || _taskCts is null) return;
+
+        var answer = MessageBox.Show(
+            "確定要中止目前任務嗎？\r\n\r\n正在執行的 AI 會被結束。如果已經改過檔案，變更會保留在隔離工作區裡，不會合併也不會影響你的本機專案。",
+            "中止任務",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes) return;
+
+        AppendLog("使用者要求中止任務，正在結束執行中的 AI…");
+        _stopButton.Enabled = false;
+        try
+        {
+            _taskCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // 任務剛好在這瞬間結束了，不需要處理。
+        }
     }
 
     private void RefreshSendButton()
