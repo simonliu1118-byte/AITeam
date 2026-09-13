@@ -11,7 +11,7 @@ public sealed class ProviderStatusRow
     private readonly LampDot _lamp = new();
     private readonly Label _nameLabel = new();
     private readonly Label _statusLabel = new();
-    private readonly Label _detailLabel = new();
+    private readonly AutoFitLabel _detailLabel = new();
     private readonly CheckBox _enabledCheck = new();
 
     public ProviderStatusRow(ProviderId provider, string name)
@@ -34,19 +34,14 @@ public sealed class ProviderStatusRow
         _statusLabel.Anchor = AnchorStyles.Left;
         _statusLabel.Margin = new Padding(0, 9, 12, 9);
 
-        // 說明欄不能用 AutoSize：AutoSize 的文字寬度會變成整張卡片的最小寬度，
-        // 視窗變窄時整列就會撐出容器右緣被裁掉。改成填滿剩餘空間，寬度不夠時
-        // 用比較小的字級自動折成兩行（不縮寫成 …，這些字本來就是要給人看的）。
-        _detailLabel.AutoSize = false;
-        _detailLabel.AutoEllipsis = false;
+        // 說明欄用固定空間：填滿剩餘寬度，文字放不下時先折行（最多兩行），
+        // 還是放不下就自動降字級，確保整段文字一定完整顯示，不裁切也不縮寫成 …。
+        // 也不能用 AutoSize，否則文字長度會變成整張卡片的最小寬度，
+        // 視窗變窄時整列會撐出容器右緣被裁掉。
         _detailLabel.Dock = DockStyle.Fill;
-        _detailLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _detailLabel.Font = new Font("Microsoft JhengHei UI", 8.5F);
+        _detailLabel.Font = new Font("Microsoft JhengHei UI", 9F);
         _detailLabel.ForeColor = SecondaryText;
         _detailLabel.Margin = new Padding(0, 2, 10, 2);
-        // 非 AutoSize 控制項會拿目前尺寸當成偏好尺寸，起始尺寸放到最小，
-        // 視窗很窄時這一欄才能被壓縮；實際寬度由 Dock=Fill 接手。
-        _detailLabel.Size = new Size(1, 1);
 
         _enabledCheck.Text = "本次使用";
         _enabledCheck.Checked = true;
