@@ -39,6 +39,16 @@ public sealed class ProviderHealthClassifyTests
     }
 
     [Theory]
+    // 「看起來成功」的輸出裡夾帶限額訊息時，不可以判成上線（GPT 曾因此顯示上線但實際已超額）
+    [InlineData("{\"type\":\"turn.completed\"}\n{\"error\":\"rate_limit_error\"}", true)]
+    [InlineData("AITEAM_HEALTH_OK usage limit reached", true)]
+    [InlineData("{\"type\":\"turn.completed\"}\nAITEAM_HEALTH_OK", false)]
+    public void QuotaMessagesAreDetectedEvenInOtherwiseSuccessfulOutput(string output, bool expected)
+    {
+        Assert.Equal(expected, ProviderHealthService.LooksLikeQuota(output));
+    }
+
+    [Theory]
     [InlineData("{\"type\":\"result\",\"is_error\":true,\"result\":\"usage limit\"}", true)]
     [InlineData("{\"type\":\"result\", \"is_error\": true }", true)]
     [InlineData("{\"type\":\"result\",\"is_error\":false,\"result\":\"AITEAM_HEALTH_OK\"}", false)]

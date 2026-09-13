@@ -785,8 +785,10 @@ public sealed class ChangeTaskService
             cancellationToken);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
-        var extracted = ExtractAntigravityAnswer(result.StandardOutput);
-        return string.IsNullOrWhiteSpace(extracted) ? result.StandardOutput : extracted;
+        var extracted = AntigravityStream.ExtractAnswer(result.StandardOutput);
+        return string.IsNullOrWhiteSpace(extracted)
+            ? AntigravityStream.DescribeUnparsableOutput(result.StandardOutput)
+            : extracted;
     }
 
     /// <summary>把使用者填的「專案內容」接在 Project 行後面；沒填就什麼都不加。</summary>
@@ -1109,46 +1111,6 @@ Re-check the actual current file contents before editing. Make the required edit
         return result;
     }
 
-    private static string ExtractAntigravityAnswer(string stream)
-    {
-        var candidates = new List<string>();
-        foreach (var line in stream.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(line);
-                CollectStrings(doc.RootElement, candidates);
-            }
-            catch { }
-        }
-        return candidates
-            .Where(x => x.Contains("AITeam", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(x => x.Length)
-            .FirstOrDefault()
-            ?? candidates.OrderByDescending(x => x.Length).FirstOrDefault()
-            ?? string.Empty;
-    }
-
-    private static void CollectStrings(JsonElement element, List<string> output)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in element.EnumerateObject())
-            {
-                if (property.Value.ValueKind == JsonValueKind.String &&
-                    (property.NameEquals("content") || property.NameEquals("text") || property.NameEquals("result")))
-                {
-                    var value = property.Value.GetString();
-                    if (!string.IsNullOrWhiteSpace(value)) output.Add(value);
-                }
-                else CollectStrings(property.Value, output);
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray()) CollectStrings(item, output);
-        }
-    }
 
     private static string FirstUsefulLine(params string[] texts)
     {
