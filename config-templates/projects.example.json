@@ -8,7 +8,6 @@
       "repo_subpath": "apps/ExampleProject",
       "github_repo": "owner/ExampleRepo",
       "default_branch": "main",
-      "merge_strategy": "merge",
       "active": true
     }
   ]

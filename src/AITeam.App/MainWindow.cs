@@ -28,7 +28,7 @@ public sealed class MainWindow : Form
     private readonly Button _projectButton = new();
     private readonly Label _modeBadge = new();
     private readonly Label _currentTaskState = new();
-    private readonly Dictionary<ProviderId, ProviderStatusCard> _providerCards = new();
+    private readonly Dictionary<ProviderId, ProviderStatusRow> _providerCards = new();
 
     private IReadOnlyList<ProjectEntry> _projects = Array.Empty<ProjectEntry>();
     private bool _taskRunning;
@@ -289,7 +289,7 @@ public sealed class MainWindow : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 2,
             Margin = new Padding(0, 16, 2, 0),
             BackColor = AppBackground
         };
@@ -299,7 +299,7 @@ public sealed class MainWindow : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 2,
-            Margin = Padding.Empty,
+            Margin = new Padding(0, 0, 0, 8),
             BackColor = AppBackground
         };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -315,29 +315,51 @@ public sealed class MainWindow : Form
         _recheckButton.FlatAppearance.BorderColor = BorderColor;
         _recheckButton.Click += async (_, _) => await RecheckProvidersAsync();
         titleRow.Controls.Add(_recheckButton, 1, 0);
-
         wrapper.Controls.Add(titleRow, 0, 0);
-        AddProviderCard(wrapper, 1, ProviderId.Codex, "GPT / Codex");
-        AddProviderCard(wrapper, 2, ProviderId.Claude, "Claude");
-        AddProviderCard(wrapper, 3, ProviderId.Antigravity, "Gemini / Antigravity");
+
+        var card = new RoundedCard
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            BackColor = CardBackground,
+            BorderColor = BorderColor,
+            Radius = 10,
+            Padding = new Padding(16, 2, 14, 2)
+        };
+
+        var grid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 5,
+            RowCount = 3,
+            BackColor = Color.Transparent
+        };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        AddProviderRow(grid, 0, ProviderId.Codex, "GPT / Codex");
+        AddProviderRow(grid, 1, ProviderId.Claude, "Claude");
+        AddProviderRow(grid, 2, ProviderId.Antigravity, "Gemini / Antigravity");
+
+        card.Controls.Add(grid);
+        wrapper.Controls.Add(card, 0, 1);
         return wrapper;
     }
 
-    private void AddProviderCard(TableLayoutPanel host, int row, ProviderId provider, string name)
+    private void AddProviderRow(TableLayoutPanel grid, int row, ProviderId provider, string name)
     {
-        var card = new ProviderStatusCard(provider, name)
+        var status = new ProviderStatusRow(provider, name);
+        status.SessionEnabledChanged += (_, enabled) =>
         {
-            Dock = DockStyle.Top,
-            Height = 68,
-            Margin = new Padding(0, row == 1 ? 8 : 7, 0, 0)
+            if (!enabled) status.SetManualDisabled();
+            else status.SetHealth(new ProviderHealth(provider, ProviderHealthState.Unknown, "待重新檢查", TimeSpan.Zero));
         };
-        card.SessionEnabledChanged += (_, enabled) =>
-        {
-            if (!enabled) card.SetManualDisabled();
-            else card.SetHealth(new ProviderHealth(provider, ProviderHealthState.Unknown, "待重新檢查", TimeSpan.Zero));
-        };
-        _providerCards[provider] = card;
-        host.Controls.Add(card, 0, row);
+        _providerCards[provider] = status;
+        status.AddTo(grid, row);
     }
 
     private void BuildRightPanel(Control parent)

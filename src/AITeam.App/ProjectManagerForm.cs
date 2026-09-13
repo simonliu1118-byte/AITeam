@@ -25,9 +25,6 @@ public sealed class ProjectManagerForm : Form
     private readonly Label _repoInfo = new();
     private readonly TreeView _tree = new();
     private readonly Label _selectedLabel = new();
-    private readonly TextBox _versionFileBox = new();
-    private readonly TextBox _tagPrefixBox = new();
-    private readonly ComboBox _mergeStrategyBox = new();
     private readonly Button _loadButton = new();
     private readonly Button _saveButton = new();
     private readonly Button _removeButton = new();
@@ -187,7 +184,7 @@ public sealed class ProjectManagerForm : Form
         root.Controls.Add(BuildLocationSection(), 0, 2);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 12, 0, 0) };
-        bottom.Controls.Add(BuildAdvancedSection(), 0, 0);
+        bottom.Controls.Add(BuildVersionRuleReferenceSection(), 0, 0);
         bottom.Controls.Add(BuildFooter(), 0, 1);
         root.Controls.Add(bottom, 0, 3);
 
@@ -283,7 +280,7 @@ public sealed class ProjectManagerForm : Form
         return card;
     }
 
-    private Control BuildAdvancedSection()
+    private Control BuildVersionRuleReferenceSection()
     {
         var card = MakeSectionCard(out var body);
         card.Margin = new Padding(0, 0, 2, 0);
@@ -294,55 +291,36 @@ public sealed class ProjectManagerForm : Form
             ForeColor = Accent,
             Cursor = Cursors.Hand,
             Font = new Font("Microsoft JhengHei UI", 9F),
-            Text = "▸ 進階設定（版號檔、Tag 前綴、合併方式）"
+            Text = "▸ 版本升號規則（參考，依共用規則自動處理，不需手動設定）"
         };
         body.Controls.Add(toggle, 0, 0);
 
-        var advBody = new TableLayoutPanel
+        var refBody = new Label
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            ColumnCount = 3,
             Visible = false,
-            Margin = new Padding(0, 12, 0, 0)
+            Margin = new Padding(0, 10, 0, 0),
+            BackColor = MetaBackground,
+            Padding = new Padding(11, 9, 11, 9),
+            ForeColor = SecondaryText,
+            Font = new Font("Microsoft JhengHei UI", 8.5F),
+            Text =
+                "‧ 版本檔一律是專案根目錄下的 VERSION（內容 X.Y.Z），AITeam 自動讀寫，不可另外指定路徑。\r\n" +
+                "‧ 建議 tag 一律自動產生為「專案名稱-vX.Y.Z」，合併完成後才由使用者自行決定要不要正式打 tag／發 Release。\r\n" +
+                "‧ 合併 PR 一律使用 merge commit，不提供 squash／rebase 選擇。\r\n" +
+                "‧ Z 版號：開始新的獨立修改項目時遞增；同一項目還沒修好、繼續修正時改為 Build 遞增，不再升 Z。\r\n" +
+                "‧ Y 版號：有明顯新功能／完整功能階段時升版，Z、Build 歸零。X（大版）只由使用者決定。"
         };
-        advBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34F));
-        advBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33F));
-        advBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33F));
-
-        var col1 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 0, 8, 0) };
-        col1.Controls.Add(MakeFieldLabel("版本檔路徑"), 0, 0);
-        _versionFileBox.Dock = DockStyle.Top;
-        _versionFileBox.Margin = new Padding(0, 5, 0, 0);
-        col1.Controls.Add(_versionFileBox, 0, 1);
-        advBody.Controls.Add(col1, 0, 0);
-
-        var col2 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(4, 0, 4, 0) };
-        col2.Controls.Add(MakeFieldLabel("Tag 前綴"), 0, 0);
-        _tagPrefixBox.Dock = DockStyle.Top;
-        _tagPrefixBox.Margin = new Padding(0, 5, 0, 0);
-        col2.Controls.Add(_tagPrefixBox, 0, 1);
-        advBody.Controls.Add(col2, 1, 0);
-
-        var col3 = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(8, 0, 0, 0) };
-        col3.Controls.Add(MakeFieldLabel("合併方式"), 0, 0);
-        _mergeStrategyBox.Dock = DockStyle.Top;
-        _mergeStrategyBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _mergeStrategyBox.Margin = new Padding(0, 5, 0, 0);
-        _mergeStrategyBox.Items.AddRange(new object[] { "Merge commit（預設）", "Squash", "Rebase" });
-        _mergeStrategyBox.SelectedIndex = 0;
-        col3.Controls.Add(_mergeStrategyBox, 0, 1);
-        advBody.Controls.Add(col3, 2, 0);
-
         toggle.Click += (_, _) =>
         {
-            advBody.Visible = !advBody.Visible;
-            toggle.Text = advBody.Visible
-                ? "▾ 進階設定（版號檔、Tag 前綴、合併方式）"
-                : "▸ 進階設定（版號檔、Tag 前綴、合併方式）";
+            refBody.Visible = !refBody.Visible;
+            toggle.Text = refBody.Visible
+                ? "▾ 版本升號規則（參考，依共用規則自動處理，不需手動設定）"
+                : "▸ 版本升號規則（參考，依共用規則自動處理，不需手動設定）";
         };
 
-        body.Controls.Add(advBody, 0, 1);
+        body.Controls.Add(refBody, 0, 1);
         return card;
     }
 
@@ -490,14 +468,6 @@ public sealed class ProjectManagerForm : Form
         _repoBox.Text = entry.GitHubRepo;
         _selectedSubpath = entry.RepoSubpath ?? "";
         _repoInfo.Text = $"Repo：{entry.GitHubRepo}\r\n本機位置：{entry.PhysicalPath}";
-        _versionFileBox.Text = entry.VersionFile ?? "";
-        _tagPrefixBox.Text = entry.TagPrefix ?? "";
-        _mergeStrategyBox.SelectedIndex = entry.MergeStrategy?.Trim().ToLowerInvariant() switch
-        {
-            "squash" => 1,
-            "rebase" => 2,
-            _ => 0
-        };
         _tree.Nodes.Clear();
         _selectedLabel.Text = string.IsNullOrWhiteSpace(_selectedSubpath)
             ? "目前選擇：Repo 根目錄（按「載入 Repo」可重新選擇）"
@@ -512,9 +482,6 @@ public sealed class ProjectManagerForm : Form
         _nameBox.Clear();
         _repoBox.Text = "";
         _repoInfo.Text = "";
-        _versionFileBox.Clear();
-        _tagPrefixBox.Clear();
-        _mergeStrategyBox.SelectedIndex = 0;
         _tree.Nodes.Clear();
         _selectedSubpath = "";
         _removeButton.Enabled = false;
@@ -634,20 +601,6 @@ public sealed class ProjectManagerForm : Form
             if (!Directory.Exists(fullPath))
                 throw new InvalidOperationException($"同步後找不到所選專案目錄：{subpath}");
 
-            var versionFile = _versionFileBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(versionFile) && File.Exists(Path.Combine(fullPath, "VERSION"))) versionFile = "VERSION";
-
-            var tagPrefix = _tagPrefixBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(tagPrefix))
-                tagPrefix = new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v";
-
-            var mergeStrategy = _mergeStrategyBox.SelectedIndex switch
-            {
-                1 => "squash",
-                2 => "rebase",
-                _ => "merge"
-            };
-
             var entry = new ProjectEntry
             {
                 Name = name,
@@ -657,9 +610,6 @@ public sealed class ProjectManagerForm : Form
                 RepoSubpath = subpath,
                 GitHubRepo = _snapshot.GitHubRepo,
                 DefaultBranch = branch,
-                VersionFile = versionFile,
-                TagPrefix = tagPrefix,
-                MergeStrategy = mergeStrategy,
                 Active = true,
                 Extra = _editing?.Extra
             };

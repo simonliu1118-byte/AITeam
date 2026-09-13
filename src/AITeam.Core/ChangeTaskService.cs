@@ -355,7 +355,7 @@ public sealed class ChangeTaskService
             else
             {
                 progress("風險等級允許自動合併，執行合併…");
-                await MergePullRequestAsync(project, prNumber, project.MergeStrategy, cancellationToken);
+                await MergePullRequestAsync(project, prNumber, cancellationToken);
                 progress("PR 已自動合併。");
             }
 
@@ -584,12 +584,11 @@ public sealed class ChangeTaskService
     private async Task MergePullRequestAsync(
         ProjectEntry project,
         int prNumber,
-        string? mergeStrategy,
         CancellationToken cancellationToken)
     {
         var result = await _runner.RunAsync(
             "gh",
-            new[] { "pr", "merge", prNumber.ToString(), "--repo", project.GitHubRepo, ResolveMergeFlag(mergeStrategy), "--delete-branch" },
+            new[] { "pr", "merge", prNumber.ToString(), "--repo", project.GitHubRepo, "--merge", "--delete-branch" },
             project.RepoPath,
             null,
             TimeSpan.FromMinutes(2),
@@ -627,13 +626,10 @@ public sealed class ChangeTaskService
         VersionBump bump,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(project.VersionFile))
-            throw new InvalidOperationException("此專案尚未設定 version_file。AITeam 不會在不知道版本規則時自行猜測，因此已停止正式化並保留工作區。");
-
-        var versionPath = Path.GetFullPath(Path.Combine(workingDirectory, project.VersionFile.Replace('/', Path.DirectorySeparatorChar)));
+        var versionPath = Path.GetFullPath(Path.Combine(workingDirectory, "VERSION"));
         var projectRoot = Path.GetFullPath(workingDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!versionPath.StartsWith(projectRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(versionPath))
-            throw new InvalidOperationException($"找不到或不允許存取版本檔：{project.VersionFile}");
+            throw new InvalidOperationException("此專案根目錄找不到 VERSION 檔。依共用規則，每個可發行專案根目錄都必須有 VERSION 檔（內容只放 X.Y.Z），AITeam 不會自行猜測版本規則，因此已停止正式化並保留工作區。");
 
         var current = (await File.ReadAllTextAsync(versionPath, cancellationToken)).Trim();
         var match = Regex.Match(current, "^(?<maj>\\d+)\\.(?<min>\\d+)\\.(?<pat>\\d+)$");
@@ -658,7 +654,8 @@ public sealed class ChangeTaskService
 
         var next = $"{major}.{minor}.{patch}";
         await File.WriteAllTextAsync(versionPath, next + Environment.NewLine, cancellationToken);
-        var prefix = string.IsNullOrWhiteSpace(project.TagPrefix) ? "v" : project.TagPrefix.Trim();
+        // 依共用規則的 monorepo tag 慣例（<project>-vX.Y.Z）自動產生建議 tag，不再由使用者個別設定前綴。
+        var prefix = new string(project.Name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v";
         return (next, prefix + next);
     }
 
@@ -993,13 +990,6 @@ Re-check the actual current file contents before editing. Make the required edit
             throw new InvalidOperationException("無法從 gh pr create 的輸出解析 PR 編號：" + FirstUsefulLine(output));
         return int.Parse(matches[^1].Groups[1].Value);
     }
-
-    internal static string ResolveMergeFlag(string? mergeStrategy) => mergeStrategy?.Trim().ToLowerInvariant() switch
-    {
-        "squash" => "--squash",
-        "rebase" => "--rebase",
-        _ => "--merge"
-    };
 
     internal static bool HasGitHubActionsWorkflows(string repoRoot)
     {

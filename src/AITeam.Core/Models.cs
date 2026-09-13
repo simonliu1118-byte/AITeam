@@ -35,15 +35,6 @@ public sealed class ProjectEntry
     [JsonPropertyName("default_branch")]
     public string DefaultBranch { get; set; } = "main";
 
-    [JsonPropertyName("version_file")]
-    public string VersionFile { get; set; } = "";
-
-    [JsonPropertyName("tag_prefix")]
-    public string TagPrefix { get; set; } = "";
-
-    [JsonPropertyName("merge_strategy")]
-    public string MergeStrategy { get; set; } = "merge";
-
     [JsonPropertyName("active")]
     public bool? Active { get; set; } = true;
 
