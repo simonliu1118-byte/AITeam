@@ -1,5 +1,13 @@
 # AITeam Governance Changelog
 
+## 2.4.0 — 2026/09/13
+
+- 共通規則升級至 2.1.0，新增 Local-first / Token-efficient 開發原則。
+- 同一工作階段避免無理由反覆完整讀取 repository；相關修正先集中於工作環境完成與本地驗證，再形成合理 commit／push 單位。
+- GitHub Windows CI 定位為正式 Windows 驗收層，不再作每個微小修改的即時編譯迴圈；Windows-specific 與 Release 項目仍保留真正 Windows 驗證。
+- Actions 成功時只確認 job／test／artifact 結果；失敗時先讀必要錯誤區段，原因不明才逐步擴大 log。
+- 明確禁止以節省 Token 為理由省略必要 test／build／package／Release 驗證。
+
 ## 2.3.0 — 2026/09/13
 
 - 共通規則同步不再依賴每日 GitHub Actions 排程；AITeam 母本一旦變更，同一輪治理工作即直接以 Git／GitHub API／治理 PR 同步 `CYapps` 與 `CYapps_pvt`。
