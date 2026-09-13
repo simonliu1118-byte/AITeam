@@ -49,7 +49,8 @@
 
 - 新 commit 的 author／committer email 一律使用 GitHub private noreply：`286269326+simonliu1118-byte@users.noreply.github.com`；GitHub 官方 bot 自身的 noreply 身分除外。
 - 不得再使用個人 Gmail 作為新 commit metadata。
-- 組織、品牌、產品與羅馬拼音等命名慣例屬 repo-specific 規則，應由該 repo 的 `REPO_POLICY.md` 或專案 `PROJECT_RULES.md` 定義，不得硬寫入共通母本。
+- **凡中文名稱需要轉寫為羅馬拼音時，一律採 Wade–Giles（威妥瑪）**；不得自行改用 Hanyu Pinyin 或其他拼音系統。既有正式英文名、品牌名、產品名或特定固定 spelling 仍依各 repo 的 `REPO_POLICY.md`／`PROJECT_RULES.md` 為準。
+- 組織、品牌、產品的固定英文 spelling 等命名慣例屬 repo-specific 規則，應由該 repo 的 `REPO_POLICY.md` 或專案 `PROJECT_RULES.md` 定義，不得硬寫入共通母本。
 - 專案、資料夾、檔名與程式識別優先沿用既有正式名稱，避免無必要更名造成相容性與追蹤問題。
 
 ## 5. 原始碼、執行資料與機密

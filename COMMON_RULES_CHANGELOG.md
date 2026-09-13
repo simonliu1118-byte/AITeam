@@ -1,8 +1,13 @@
 # Shared Common Rules Changelog
 
+## 2.3.0 — 2026/09/13
+
+- 明確將 Wade–Giles（威妥瑪）定為全域共通羅馬拼音規則：凡中文名稱需要轉寫為羅馬拼音時一律使用 Wade–Giles。
+- 既有正式英文名、品牌名、產品名與固定 spelling 仍由各 repo 的 `REPO_POLICY.md`／`PROJECT_RULES.md` 定義；因此公司專屬名稱不會被帶入個人 sandbox。
+
 ## 2.2.0 — 2026/09/13
 
-- 將共通母本泛化為可同時供公司與個人 repository 使用的中性規則；公司／個人身分、品牌、羅馬拼音、copyright 與授權改由各 repo 的 `REPO_POLICY.md` 定義。
+- 將共通母本泛化為可同時供公司與個人 repository 使用的中性規則；公司／個人身分、品牌、特定固定拼法、copyright 與授權改由各 repo 的 `REPO_POLICY.md` 定義。
 - 共通母本不再直接包含特定公司名稱、公司 copyright 或特定下游 repo 名稱；AITeam 仍是唯一共通母本來源。
 - 新增 WPF 至 Windows-specific 正式驗證範圍，延續 Local-first / GitHub-final verification 原則。
 - 允許個人 sandbox 等 repo 直接同步同一份共通母本，而不攜帶公司專屬內容。
