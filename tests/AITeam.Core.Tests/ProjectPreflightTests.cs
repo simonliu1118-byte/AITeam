@@ -27,17 +27,19 @@ public sealed class ProjectPreflightTests : IDisposable
         Assert.Equal(PreflightSeverity.Blocker, issue.Severity);
     }
 
-    [Fact]
-    public void OneAiOnline_IsOnlyAWarning_BecauseInquiriesStillWork()
+    [Theory]
+    [InlineData(1, "受限模式")]
+    [InlineData(2, "降級模式")]
+    public void FewerThanThreeAis_IsOnlyAWarning_BecauseTheTaskStillRuns(int online, string expectedMode)
     {
         File.WriteAllText(Path.Combine(_repo, "VERSION"), "1.2.3\n");
         Directory.CreateDirectory(Path.Combine(_repo, ".github", "workflows"));
         File.WriteAllText(Path.Combine(_repo, ".github", "workflows", "ci.yml"), "name: ci");
 
-        var issue = Assert.Single(ProjectPreflight.Inspect(Project(), 1));
+        var issue = Assert.Single(ProjectPreflight.Inspect(Project(), online));
 
         Assert.Equal(PreflightSeverity.Warning, issue.Severity);
-        Assert.Contains("只有 1 個 AI", issue.Title);
+        Assert.Contains(expectedMode, issue.Title);
     }
 
     [Fact]
