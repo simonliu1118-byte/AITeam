@@ -791,11 +791,26 @@ public sealed class ChangeTaskService
             : extracted;
     }
 
-    /// <summary>把使用者填的「專案內容」接在 Project 行後面；沒填就什麼都不加。</summary>
-    internal static string DescribeProject(ProjectEntry project) =>
-        string.IsNullOrWhiteSpace(project.Description)
+    /// <summary>
+    /// 規則指路。三層規則檔本來就同步在每個納管 repo 的根目錄裡，AI 的工作副本也帶著它們，
+    /// 所以不需要把全文貼進 prompt（三份加起來約 26 KB，每個 AI、每一輪都貼一次非常浪費），
+    /// 只要告訴 AI 去哪裡讀、讀不到就跳過即可。
+    /// </summary>
+    internal const string RulesPointer =
+        "Repository rules: this repository indexes its permanent rules in AGENTS.md at the repository root " +
+        "(REPOSITORY_RULES.md -> REPO_POLICY.md -> PROJECT_RULES.md). Read them from the working copy on disk " +
+        "and follow them; the user's explicit instruction for this task wins over anything they do not cover. " +
+        "If AGENTS.md is not present, skip this step instead of asking the user for the rules.";
+
+    /// <summary>把使用者填的「專案內容」接在 Project 行後面（沒填就不加），並一律附上規則指路。</summary>
+    internal static string DescribeProject(ProjectEntry project)
+    {
+        var header = string.IsNullOrWhiteSpace(project.Description)
             ? $"Project: {project.Name}"
             : $"Project: {project.Name}{Environment.NewLine}What this project is: {project.Description.Trim()}";
+
+        return $"{header}{Environment.NewLine}{RulesPointer}";
+    }
 
     private static string BuildScoutPrompt(ProjectEntry project, string request) => $"""
 You are AITeam Scout. Read the repository and gather evidence for this requested change. Do not modify files.
