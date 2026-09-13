@@ -131,7 +131,9 @@ public sealed class InquiryService
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not ChangePipelineDispatchException)
                 {
                     failures.Add($"{provider.ToFriendlyName()}：{ex.Message}");
-                    progress($"{provider.ToFriendlyName()} 本次失敗，嘗試下一個 AI。");
+                    // 失敗原因一定要當場寫進 log：原本只收進 failures，而 failures 只有在
+                    // 「所有 AI 都失敗」時才會顯示，只要有別的 AI 接手成功，原因就永遠看不到了。
+                    progress($"{provider.ToFriendlyName()} 本次失敗，改試下一個 AI。原因：{OneLine(ex.Message, 300)}");
                 }
             }
 
@@ -200,7 +202,7 @@ public sealed class InquiryService
                 TimeSpan.FromMinutes(5),
                 cancellationToken);
             if (result.ExitCode != 0)
-                throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
+                throw new InvalidOperationException(DescribeFailure(result));
             if (File.Exists(lastMessage)) return await File.ReadAllTextAsync(lastMessage, cancellationToken);
             return result.StandardOutput;
         }
@@ -228,7 +230,7 @@ public sealed class InquiryService
             TimeSpan.FromMinutes(5),
             cancellationToken);
         if (result.ExitCode != 0)
-            throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
+            throw new InvalidOperationException(DescribeFailure(result));
         return result.StandardOutput;
     }
 
@@ -254,7 +256,7 @@ public sealed class InquiryService
             TimeSpan.FromMinutes(6),
             cancellationToken);
         if (result.ExitCode != 0)
-            throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
+            throw new InvalidOperationException(DescribeFailure(result));
 
         var extracted = AntigravityStream.ExtractAnswer(result.StandardOutput);
         return string.IsNullOrWhiteSpace(extracted)
@@ -320,5 +322,25 @@ User request:
             if (!string.IsNullOrWhiteSpace(line)) return line.Trim();
         }
         return "未知錯誤";
+    }
+
+    /// <summary>
+    /// 描述一次 CLI 失敗。除了錯誤訊息，也帶上結束碼——沒有訊息時（有些 CLI 失敗是靜默的）
+    /// 至少還看得出「它確實跑起來又失敗了」，而不是只看到一句沒有內容的失敗。
+    /// </summary>
+    private static string DescribeFailure(ProcessRunResult result)
+    {
+        var message = FirstUsefulLine(result.StandardError, result.StandardOutput);
+        return message == "未知錯誤"
+            ? $"CLI 以結束碼 {result.ExitCode} 結束，但沒有輸出任何錯誤訊息。"
+            : $"（結束碼 {result.ExitCode}）{message}";
+    }
+
+    /// <summary>把多行訊息壓成一行並截長度，避免一則 log 洗掉整個畫面。</summary>
+    internal static string OneLine(string text, int max)
+    {
+        var value = System.Text.RegularExpressions.Regex.Replace(text ?? "", "\\s+", " ").Trim();
+        if (value.Length == 0) return "（沒有錯誤訊息）";
+        return value.Length <= max ? value : value[..max].TrimEnd() + "…";
     }
 }
