@@ -29,7 +29,7 @@ public sealed class StatusBadge : Control
         AdjustWidth();
     }
 
-    private Font MeterFont => new(FontFamily, 8.5F, FontStyle.Regular);
+    private Font MeterFont => new(Font.FontFamily, 8.5F, FontStyle.Regular);
 
     public void SetStatus(string text, string meter, Color fill, Color foreColor, Color dot, Color outline)
     {
