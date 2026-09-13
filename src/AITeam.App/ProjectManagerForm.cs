@@ -25,6 +25,7 @@ public sealed class ProjectManagerForm : Form
 
     private readonly ListBox _projectList = new();
     private readonly TextBox _nameBox = new();
+    private readonly TextBox _descriptionBox = new();
     private readonly ComboBox _repoBox = new();
     private readonly Label _repoInfo = new();
     private readonly TreeView _tree = new();
@@ -242,23 +243,28 @@ public sealed class ProjectManagerForm : Form
         root.Controls.Add(BuildRepoSection(), 0, 1);
         root.Controls.Add(BuildLocationSection(), 0, 2);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 12, 0, 0) };
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        bottom.Controls.Add(BuildVersionRuleReferenceSection(), 0, 0);
-        bottom.Controls.Add(BuildFooter(), 0, 1);
-        root.Controls.Add(bottom, 0, 3);
+        root.Controls.Add(BuildFooter(), 0, 3);
 
         return root;
     }
 
     private Control BuildBasicInfoSection()
     {
-        var card = MakeSectionCard(out var body, extraRows: 1);
+        var card = MakeSectionCard(out var body, extraRows: 3);
         body.Controls.Add(SectionHeader(1, "基本資訊"), 0, 0);
         body.Controls.Add(MakeFieldLabel("專案名稱"), 0, 1);
         _nameBox.Dock = DockStyle.Top;
-        _nameBox.Margin = new Padding(0, 5, 0, 0);
+        _nameBox.Margin = new Padding(0, 5, 0, 12);
         body.Controls.Add(_nameBox, 0, 2);
+
+        body.Controls.Add(MakeFieldLabel("專案內容（這個專案是做什麼的，會一併交給 AI 當作背景說明）"), 0, 3);
+        _descriptionBox.Dock = DockStyle.Top;
+        _descriptionBox.Multiline = true;
+        _descriptionBox.ScrollBars = ScrollBars.Vertical;
+        _descriptionBox.Height = 64;
+        _descriptionBox.Margin = new Padding(0, 5, 0, 0);
+        _descriptionBox.PlaceholderText = "例如：記帳用的桌面小工具，資料存在本機 SQLite，主要使用者是我自己。";
+        body.Controls.Add(_descriptionBox, 0, 4);
         return card;
     }
 
@@ -337,50 +343,6 @@ public sealed class ProjectManagerForm : Form
         };
         body.Controls.Add(_tree, 0, 3);
 
-        return card;
-    }
-
-    private Control BuildVersionRuleReferenceSection()
-    {
-        var card = MakeSectionCard(out var body);
-        card.Margin = new Padding(0, 0, 2, 0);
-
-        var toggle = new Label
-        {
-            AutoSize = true,
-            ForeColor = Accent,
-            Cursor = Cursors.Hand,
-            Font = new Font("Microsoft JhengHei UI", 9F),
-            Text = "▸ 版本升號規則（參考，依共用規則自動處理，不需手動設定）"
-        };
-        body.Controls.Add(toggle, 0, 0);
-
-        var refBody = new Label
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            Visible = false,
-            Margin = new Padding(0, 10, 0, 0),
-            BackColor = MetaBackground,
-            Padding = new Padding(11, 9, 11, 9),
-            ForeColor = SecondaryText,
-            Font = new Font("Microsoft JhengHei UI", 8.5F),
-            Text =
-                "‧ 版本檔一律是專案根目錄下的 VERSION（內容 X.Y.Z），AITeam 自動讀寫，不可另外指定路徑。\r\n" +
-                "‧ 建議 tag 一律自動產生為「專案名稱-vX.Y.Z」，合併完成後才由使用者自行決定要不要正式打 tag／發 Release。\r\n" +
-                "‧ 合併 PR 一律使用 merge commit，不提供 squash／rebase 選擇。\r\n" +
-                "‧ Z 版號：開始新的獨立修改項目時遞增；同一項目還沒修好、繼續修正時改為 Build 遞增，不再升 Z。\r\n" +
-                "‧ Y 版號：有明顯新功能／完整功能階段時升版，Z、Build 歸零。X（大版）只由使用者決定。"
-        };
-        toggle.Click += (_, _) =>
-        {
-            refBody.Visible = !refBody.Visible;
-            toggle.Text = refBody.Visible
-                ? "▾ 版本升號規則（參考，依共用規則自動處理，不需手動設定）"
-                : "▸ 版本升號規則（參考，依共用規則自動處理，不需手動設定）";
-        };
-
-        body.Controls.Add(refBody, 0, 1);
         return card;
     }
 
@@ -526,6 +488,7 @@ public sealed class ProjectManagerForm : Form
         _editing = entry;
         _snapshot = null;
         _nameBox.Text = entry.Name;
+        _descriptionBox.Text = entry.Description ?? "";
         _repoBox.Text = entry.GitHubRepo;
         _selectedSubpath = entry.RepoSubpath ?? "";
         _repoInfo.Text = $"Repo：{entry.GitHubRepo}\r\n本機位置：{entry.PhysicalPath}";
@@ -541,6 +504,7 @@ public sealed class ProjectManagerForm : Form
         _editing = null;
         _snapshot = null;
         _nameBox.Clear();
+        _descriptionBox.Clear();
         _repoBox.Text = "";
         _repoInfo.Text = "";
         _tree.Nodes.Clear();
@@ -665,6 +629,7 @@ public sealed class ProjectManagerForm : Form
             var entry = new ProjectEntry
             {
                 Name = name,
+                Description = _descriptionBox.Text.Trim(),
                 ProjectPath = fullPath,
                 RepoName = _snapshot.GitHubRepo.Split('/')[1],
                 RepoPath = _snapshot.RepoPath,

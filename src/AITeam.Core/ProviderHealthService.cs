@@ -85,7 +85,11 @@ public sealed class ProviderHealthService
             args,
             null,
             TimeSpan.FromSeconds(60),
-            result => result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput),
+            // Claude CLI 超過限額時仍可能以 exit code 0 回傳，只在 JSON 裡標 is_error，
+            // 只看 exit code 會把「超過限額」誤判成上線，因此一併檢查這個旗標。
+            result => result.ExitCode == 0
+                      && !string.IsNullOrWhiteSpace(result.StandardOutput)
+                      && !IsJsonErrorResult(result.StandardOutput),
             cancellationToken);
     }
 
@@ -173,12 +177,15 @@ public sealed class ProviderHealthService
         }
     }
 
-    private static ProviderHealth ClassifyFailure(
+    internal static ProviderHealth ClassifyFailure(
         ProviderId provider,
         string text,
         TimeSpan duration)
     {
-        var lower = text.ToLowerInvariant();
+        // CLI 的訊息有兩種寫法：給人看的句子（"usage limit reached"）與 API 機器代碼
+        // （"rate_limit_error"、"resource_exhausted"）。先把底線與連字號正規化成空白，
+        // 同一組關鍵字才能同時比對到兩種寫法，不會因為寫法不同就誤判成一般錯誤。
+        var lower = Normalize(text);
 
         if (ContainsAny(lower,
                 "usage limit",
@@ -188,7 +195,16 @@ public sealed class ProviderHealthService
                 "too many requests",
                 "credit",
                 "limit reached",
-                "try again at"))
+                "limit exceeded",
+                "exceeded your",
+                "reached your limit",
+                "try again at",
+                "resets at",
+                "upgrade your plan",
+                "429 too many",
+                "error 429",
+                "status 429",
+                "http 429"))
         {
             return new ProviderHealth(provider, ProviderHealthState.Quota, "超過限額", duration);
         }
@@ -230,6 +246,15 @@ public sealed class ProviderHealthService
             string.IsNullOrWhiteSpace(firstLine) ? "異常" : firstLine,
             duration);
     }
+
+    internal static bool IsJsonErrorResult(string output)
+    {
+        var compact = output.Replace(" ", "").Replace("\r", "").Replace("\n", "");
+        return compact.Contains("\"is_error\":true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Normalize(string text) =>
+        text.ToLowerInvariant().Replace('_', ' ').Replace('-', ' ');
 
     private static bool ContainsAny(string text, params string[] candidates) =>
         candidates.Any(text.Contains);

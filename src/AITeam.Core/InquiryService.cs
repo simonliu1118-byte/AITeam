@@ -261,6 +261,7 @@ public sealed class InquiryService
 
     private static string BuildPrompt(ProjectEntry project, string request) => $"""
 You are the AITeam read-only request gate for project "{project.Name}".
+{ChangeTaskService.DescribeProject(project)}
 Work strictly inside the provided isolated copy of the repository. You may inspect files, search code, and reason about the project, but do not intentionally modify files.
 
 Classify the user's request first:
