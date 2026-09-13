@@ -789,9 +789,15 @@ public sealed class ChangeTaskService
         return string.IsNullOrWhiteSpace(extracted) ? result.StandardOutput : extracted;
     }
 
+    /// <summary>把使用者填的「專案內容」接在 Project 行後面；沒填就什麼都不加。</summary>
+    internal static string DescribeProject(ProjectEntry project) =>
+        string.IsNullOrWhiteSpace(project.Description)
+            ? $"Project: {project.Name}"
+            : $"Project: {project.Name}{Environment.NewLine}What this project is: {project.Description.Trim()}";
+
     private static string BuildScoutPrompt(ProjectEntry project, string request) => $"""
 You are AITeam Scout. Read the repository and gather evidence for this requested change. Do not modify files.
-Project: {project.Name}
+{DescribeProject(project)}
 Request: {request}
 Return concise Traditional Chinese with relevant file paths, symbols, current behavior, likely tests, and risks. Do not design an elaborate evidence pipeline; inspect the repo directly.
 """;
@@ -814,7 +820,7 @@ This project has no GitHub Actions workflow at all yet (detected tech stack: {te
 
         return $"""
 You are AITeam Plan Gate. Validate the Scout evidence against the repository, discuss with the user when needed, then finalize the implementation plan. Do not modify files.
-Project: {project.Name}
+{DescribeProject(project)}
 Request: {request}
 Scout report:
 {scout}
@@ -839,7 +845,7 @@ Then provide a compact Traditional Chinese plan: files/symbols to change, behavi
 
     private static string BuildImplementPrompt(ProjectEntry project, string request, string scout, string plan) => $"""
 You are AITeam Implementer. Work only inside this isolated Git worktree and implement the approved request. You MAY edit files here.
-Project: {project.Name}
+{DescribeProject(project)}
 Request: {request}
 Scout:
 {scout}

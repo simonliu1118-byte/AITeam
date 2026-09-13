@@ -17,6 +17,10 @@ public sealed class ProjectEntry
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
+    /// <summary>這個專案是做什麼的，由使用者自行填寫，會一併交給 AI 當作背景說明。</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = "";
+
     [JsonPropertyName("project_path")]
     public string ProjectPath { get; set; } = "";
 
