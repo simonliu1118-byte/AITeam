@@ -53,6 +53,10 @@ public sealed class ChangeTaskService
     private readonly WorkflowSettings _workflow;
     private readonly AgentsConfig _agents;
 
+    // 目前這一輪任務要把「AI 正在做什麼」送到哪裡。同一時間只會有一個任務在跑
+    // （主畫面用 _taskRunning 擋住），所以用欄位帶著走，不必一路多傳七八層參數。
+    private Action<string>? _onActivity;
+
     public ChangeTaskService(string runtimeRoot, IProcessRunner runner)
     {
         _runtimeRoot = runtimeRoot;
@@ -70,8 +74,11 @@ public sealed class ChangeTaskService
         Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
         Action<TaskProgress> onStage,
+        Action<string> onActivity,
         CancellationToken cancellationToken)
     {
+        _onActivity = onActivity;
+
         void Stage(TaskStage stage, string detail, ProviderId? who = null, int round = 0) =>
             onStage(new TaskProgress(TaskKind.Change, stage, TaskActivity.Running, detail, who, round));
 
@@ -710,6 +717,19 @@ public sealed class ChangeTaskService
         return result;
     }
 
+    /// <summary>把某一家 CLI 的原始輸出行，翻成一句可讀的「現在在做什麼」再送出去。</summary>
+    private Action<string>? ActivitySink(ProviderId provider)
+    {
+        var sink = _onActivity;
+        if (sink is null) return null;
+
+        return line =>
+        {
+            var described = ProviderActivity.Describe(provider, line);
+            if (described is not null) sink($"{provider.ToFriendlyName()}：{described}");
+        };
+    }
+
     private async Task<string> RunProviderAsync(
         ProviderId provider,
         string workingDirectory,
@@ -741,7 +761,8 @@ public sealed class ChangeTaskService
                 "exec", "--skip-git-repo-check", "--output-last-message", lastMessage, "-"
             };
             var result = await _runner.RunAsync(
-                _agents.CodexCommand, args, workingDirectory, prompt, TimeSpan.FromMinutes(15), cancellationToken);
+                _agents.CodexCommand, args, workingDirectory, prompt, TimeSpan.FromMinutes(15), cancellationToken,
+                ActivitySink(ProviderId.Codex));
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
             return File.Exists(lastMessage)
@@ -766,7 +787,8 @@ public sealed class ChangeTaskService
             "--no-session-persistence"
         };
         var result = await _runner.RunAsync(
-            _agents.ClaudeCommand, args, workingDirectory, null, TimeSpan.FromMinutes(15), cancellationToken);
+            _agents.ClaudeCommand, args, workingDirectory, null, TimeSpan.FromMinutes(15), cancellationToken,
+            ActivitySink(ProviderId.Claude));
         if (result.ExitCode != 0)
             throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
         return result.StandardOutput;
@@ -791,7 +813,8 @@ public sealed class ChangeTaskService
             workingDirectory,
             payload,
             TimeSpan.FromMinutes(16),
-            cancellationToken);
+            cancellationToken,
+            ActivitySink(ProviderId.Antigravity));
         if (result.ExitCode != 0)
             throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
         var extracted = AntigravityStream.ExtractAnswer(result.StandardOutput);

@@ -83,13 +83,19 @@ public static class CliExecutableResolver
 
 public interface IProcessRunner
 {
+    /// <param name="onOutputLine">
+    /// CLI 每吐出一行就會被呼叫一次（stdout 與 stderr 都會）。傳 null 就是以前的行為：
+    /// 跑完才一次拿到全部輸出。有了這個回呼，實作階段才不會是一個十幾分鐘、
+    /// 畫面上完全沒有動靜的黑洞。可能來自背景執行緒。
+    /// </param>
     Task<ProcessRunResult> RunAsync(
         string fileName,
         IEnumerable<string> arguments,
         string workingDirectory,
         string? standardInput,
         TimeSpan timeout,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Action<string>? onOutputLine = null);
 }
 
 public sealed class ProcessRunner : IProcessRunner
@@ -100,7 +106,8 @@ public sealed class ProcessRunner : IProcessRunner
         string workingDirectory,
         string? standardInput,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<string>? onOutputLine = null)
     {
         var executable = CliExecutableResolver.Resolve(fileName);
         if (executable is null)
@@ -145,8 +152,9 @@ public sealed class ProcessRunner : IProcessRunner
             throw new FileNotFoundException($"找不到 {fileName}。", executable, ex);
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
+        // 逐行讀而不是 ReadToEnd：一邊累積完整輸出，一邊把每一行往外送給畫面。
+        var stdoutTask = ReadAllAsync(process.StandardOutput, onOutputLine);
+        var stderrTask = ReadAllAsync(process.StandardError, onOutputLine);
 
         if (standardInput is not null)
         {
@@ -189,5 +197,26 @@ public sealed class ProcessRunner : IProcessRunner
         var duration = DateTimeOffset.UtcNow - start;
 
         return new ProcessRunResult(process.ExitCode, stdout, stderr, duration);
+    }
+
+    private static async Task<string> ReadAllAsync(StreamReader reader, Action<string>? onOutputLine)
+    {
+        var all = new StringBuilder();
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            all.Append(line).Append('\n');
+            if (onOutputLine is null) continue;
+
+            try
+            {
+                onOutputLine(line);
+            }
+            catch
+            {
+                // 回呼（通常是更新畫面）出問題不該讓整個工作失敗。
+            }
+        }
+
+        return all.ToString();
     }
 }
