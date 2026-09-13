@@ -53,7 +53,6 @@ public sealed class MainWindow : Form
         BuildUi();
         LoadProjects();
 
-        Shown += (_, _) => ForceLayoutRefreshAfterDpiScale();
         Shown += async (_, _) => await RecheckProvidersAsync();
         FormClosing += OnFormClosing;
     }
@@ -69,6 +68,10 @@ public sealed class MainWindow : Form
             Padding = Padding.Empty,
             Margin = Padding.Empty
         };
+        // 單欄 TableLayoutPanel 一定要明確指定 Percent 欄寬：沒有指定時該欄預設是
+        // AutoSize，內容需要多寬就撐多寬，視窗變窄時不會跟著縮，整塊內容會溢出容器
+        // 右緣被裁掉（這正是「左半邊右緣被切到」的成因）。
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         Controls.Add(shell);
@@ -159,6 +162,7 @@ public sealed class MainWindow : Form
             BackColor = AppBackground,
             Margin = Padding.Empty
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -205,10 +209,12 @@ public sealed class MainWindow : Form
         bottom.Controls.Add(new Label
         {
             Text = "任務執行中仍可先輸入下一件；完成前「送出」會保持鎖定。",
-            AutoSize = true,
+            AutoSize = false,
+            AutoEllipsis = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = SecondaryText,
-            Anchor = AnchorStyles.Left,
-            Margin = new Padding(2, 10, 10, 0)
+            Margin = new Padding(2, 0, 10, 0)
         }, 0, 0);
 
         _sendButton.Text = "送出";
@@ -273,7 +279,10 @@ public sealed class MainWindow : Form
         layout.Controls.Add(_projectBox, 0, 0);
         layout.Controls.Add(_projectButton, 1, 0);
 
-        _projectInfo.AutoSize = true;
+        _projectInfo.AutoSize = false;
+        _projectInfo.AutoEllipsis = true;
+        _projectInfo.Dock = DockStyle.Fill;
+        _projectInfo.TextAlign = ContentAlignment.TopLeft;
         _projectInfo.ForeColor = SecondaryText;
         _projectInfo.Margin = new Padding(0, 8, 0, 0);
         layout.SetColumnSpan(_projectInfo, 2);
@@ -293,6 +302,7 @@ public sealed class MainWindow : Form
             Margin = new Padding(0, 16, 2, 0),
             BackColor = AppBackground
         };
+        wrapper.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
         var titleRow = new TableLayoutPanel
         {
@@ -373,6 +383,7 @@ public sealed class MainWindow : Form
             BackColor = AppBackground,
             Margin = Padding.Empty
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -397,6 +408,7 @@ public sealed class MainWindow : Form
             RowCount = 2,
             BackColor = Color.Transparent
         };
+        currentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         currentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         currentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
@@ -643,18 +655,6 @@ public sealed class MainWindow : Form
         _sendButton.Enabled = canSend;
         _sendButton.BackColor = canSend ? Accent : Color.FromArgb(181, 190, 200);
         _sendButton.Cursor = canSend ? Cursors.Hand : Cursors.Default;
-    }
-
-    private void ForceLayoutRefreshAfterDpiScale()
-    {
-        // On PerMonitorV2-aware displays with DPI scaling other than 100%, the very first
-        // layout pass can settle at slightly wrong bounds before Windows finishes applying
-        // the real DPI scale, leaving custom-painted card borders clipped on the right edge
-        // until something forces a full re-layout (e.g. maximizing). Nudging the size by a
-        // pixel and back forces that re-layout once the window's final bounds are known.
-        var size = Size;
-        Size = new Size(size.Width + 1, size.Height);
-        Size = size;
     }
 
     private void OnFormClosing(object? sender, FormClosingEventArgs e)

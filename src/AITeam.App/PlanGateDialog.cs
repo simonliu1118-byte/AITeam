@@ -45,6 +45,7 @@ public sealed class PlanGateDialog : Form
             Padding = new Padding(18),
             BackColor = AppBackground
         };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));

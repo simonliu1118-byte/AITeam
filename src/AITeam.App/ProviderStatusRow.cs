@@ -34,10 +34,17 @@ public sealed class ProviderStatusRow
         _statusLabel.Anchor = AnchorStyles.Left;
         _statusLabel.Margin = new Padding(0, 9, 18, 9);
 
-        _detailLabel.AutoSize = true;
+        // 說明欄不能用 AutoSize：AutoSize 的文字寬度會變成整張卡片的最小寬度，
+        // 視窗變窄時整列就會撐出容器右緣被裁掉。改成填滿剩餘空間、過長自動縮寫。
+        _detailLabel.AutoSize = false;
+        _detailLabel.AutoEllipsis = true;
+        _detailLabel.Dock = DockStyle.Fill;
+        _detailLabel.TextAlign = ContentAlignment.MiddleLeft;
         _detailLabel.ForeColor = SecondaryText;
-        _detailLabel.Anchor = AnchorStyles.Left;
-        _detailLabel.Margin = new Padding(0, 9, 10, 9);
+        _detailLabel.Margin = new Padding(0, 4, 10, 4);
+        // 非 AutoSize 控制項會拿目前尺寸當成偏好尺寸，起始尺寸放到最小，
+        // 視窗很窄時這一欄才能被壓縮；實際寬度由 Dock=Fill 接手。
+        _detailLabel.Size = new Size(1, 1);
 
         _enabledCheck.Text = "本次使用";
         _enabledCheck.Checked = true;
