@@ -56,6 +56,11 @@ public sealed class ChangeTaskService
     // 目前這一輪任務要把「AI 正在做什麼」送到哪裡。同一時間只會有一個任務在跑
     // （主畫面用 _taskRunning 擋住），所以用欄位帶著走，不必一路多傳七八層參數。
     private Action<string>? _onActivity;
+    private Action<string>? _progress;
+    private TaskInteraction _interaction = TaskInteraction.None;
+
+    /// <summary>同一步最多因為「立刻套用」重來幾次，避免一直按就一直重跑。</summary>
+    private const int MaxInterruptRetries = 5;
 
     public ChangeTaskService(string runtimeRoot, IProcessRunner runner)
     {
@@ -75,9 +80,12 @@ public sealed class ChangeTaskService
         Action<string> progress,
         Action<TaskProgress> onStage,
         Action<string> onActivity,
+        TaskInteraction interaction,
         CancellationToken cancellationToken)
     {
         _onActivity = onActivity;
+        _progress = progress;
+        _interaction = interaction;
 
         void Stage(TaskStage stage, string detail, ProviderId? who = null, int round = 0) =>
             onStage(new TaskProgress(TaskKind.Change, stage, TaskActivity.Running, detail, who, round));
@@ -185,6 +193,7 @@ public sealed class ChangeTaskService
                 cancellationToken);
 
             await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+            await RunImplementCheckpointAsync(worktreeRoot, onStage, progress, cancellationToken);
 
             ProviderId challengeProvider = PickDifferent(
                 available,
@@ -441,6 +450,43 @@ public sealed class ChangeTaskService
             {
                 progress($"本次未正式化；工作區保留於：{worktreeRoot}");
             }
+        }
+    }
+
+    /// <summary>
+    /// 送出任務時勾了「實作完成後先讓我看過」才會停這一下。停下來時給使用者看改了哪些檔案，
+    /// 讓他可以在審查開始前補充意見，或者直接中止。
+    /// </summary>
+    private async Task RunImplementCheckpointAsync(
+        string worktreeRoot,
+        Action<TaskProgress> onStage,
+        Action<string> progress,
+        CancellationToken cancellationToken)
+    {
+        if (!_interaction.PauseAfterImplement) return;
+
+        var stat = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--stat" }, cancellationToken);
+        var summary = string.IsNullOrWhiteSpace(stat.StandardOutput)
+            ? "（沒有取得變更摘要。）"
+            : stat.StandardOutput.Trim();
+
+        onStage(new TaskProgress(
+            TaskKind.Change, TaskStage.Implement, TaskActivity.WaitingForUser,
+            "實作完成，等你確認要不要繼續"));
+        progress("實作完成，依你的設定先停下來等你確認。");
+
+        var answer = await _interaction.AskCheckpoint(
+            new CheckpointPrompt("實作完成，接下來要進入審查。", summary),
+            cancellationToken);
+
+        if (answer.Action == CheckpointAction.Abort)
+            throw new OperationCanceledException("使用者在實作完成後的確認點中止了任務。", cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(answer.Note))
+        {
+            // 走同一個留言板，後面的每一步都會看到這段補充。
+            _interaction.Notes.Add(answer.Note, interruptNow: false);
+            progress($"已記下你的補充，接下來的每一步都會帶著它：{OneLine(answer.Note, 200)}");
         }
     }
 
@@ -707,11 +753,55 @@ public sealed class ChangeTaskService
     }
 
     private async Task<string> RunReadOnlyAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken) =>
-        await RunProviderAsync(provider, workingDirectory, prompt, false, cancellationToken);
+        await RunWithNotesAsync(provider, workingDirectory, prompt, false, cancellationToken);
+
+    /// <summary>
+    /// 派工前先把使用者排隊中的補充併進提示；使用者選「立刻套用」時，這一步會被中斷，
+    /// 帶著新的補充從頭再跑一次（已經吃進去的補充要留著，不能因為重跑就掉了）。
+    /// </summary>
+    private async Task<string> RunWithNotesAsync(
+        ProviderId provider,
+        string workingDirectory,
+        string basePrompt,
+        bool allowWrite,
+        CancellationToken cancellationToken)
+    {
+        var carried = new List<string>();
+
+        for (var attempt = 0; ; attempt++)
+        {
+            carried.AddRange(_interaction.Notes.Take());
+            var prompt = ComposeWithNotes(basePrompt, carried);
+
+            var step = _interaction.Notes.BeginStep(cancellationToken);
+            try
+            {
+                return await RunProviderAsync(provider, workingDirectory, prompt, allowWrite, step.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < MaxInterruptRetries)
+            {
+                _progress?.Invoke($"依你的要求中斷 {provider.ToFriendlyName()} 這一步，帶著你的補充重新開始…");
+            }
+            finally
+            {
+                _interaction.Notes.EndStep(step);
+            }
+        }
+    }
+
+    internal static string ComposeWithNotes(string basePrompt, IReadOnlyList<string> notes)
+    {
+        if (notes.Count == 0) return basePrompt;
+
+        var lines = string.Join(Environment.NewLine, notes.Select((note, i) => $"{i + 1}. {note}"));
+        return basePrompt + Environment.NewLine + Environment.NewLine +
+               "The user added the following instructions after this task started. They come from the user and " +
+               "take priority over earlier wording that conflicts with them:" + Environment.NewLine + lines;
+    }
 
     private async Task<string> RunWriteAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken)
     {
-        var result = await RunProviderAsync(provider, workingDirectory, prompt, true, cancellationToken);
+        var result = await RunWithNotesAsync(provider, workingDirectory, prompt, true, cancellationToken);
         if (string.IsNullOrWhiteSpace(result))
             throw new InvalidOperationException($"{provider.ToFriendlyName()} 沒有回傳實作結果。");
         return result;
