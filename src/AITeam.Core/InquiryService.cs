@@ -31,6 +31,7 @@ public sealed class InquiryService
 
     // 這一輪任務要把「AI 正在做什麼」送到哪裡；同一時間只會有一個任務在跑。
     private Action<string>? _onActivity;
+    private TaskInteraction _interaction = TaskInteraction.None;
     private readonly ChangeTaskService _changeTaskService;
     private readonly GitRepositoryService _git;
     private readonly AgentsConfig _agents;
@@ -52,9 +53,11 @@ public sealed class InquiryService
         Action<string> progress,
         Action<TaskProgress> onStage,
         Action<string> onActivity,
+        TaskInteraction interaction,
         CancellationToken cancellationToken)
     {
         _onActivity = onActivity;
+        _interaction = interaction;
 
         if (candidates.Count == 0)
             throw new InvalidOperationException("目前沒有可用的 AI。請先重新檢查 AI 狀態。");
@@ -100,7 +103,7 @@ public sealed class InquiryService
                 progress($"{provider.ToFriendlyName()} 正在讀取專案並判斷需求…");
                 try
                 {
-                    var answer = await RunProviderAsync(provider, workingDirectory, prompt, cancellationToken);
+                    var answer = await RunWithNotesAsync(provider, workingDirectory, prompt, progress, cancellationToken);
                     if (string.IsNullOrWhiteSpace(answer))
                         throw new InvalidOperationException("AI 沒有回傳可用內容。");
 
@@ -118,6 +121,7 @@ public sealed class InquiryService
                                 progress,
                                 onStage,
                                 onActivity,
+                                interaction,
                                 cancellationToken);
 
                             var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";
@@ -181,6 +185,39 @@ public sealed class InquiryService
             var described = ProviderActivity.Describe(provider, line);
             if (described is not null) sink($"{provider.ToFriendlyName()}：{described}");
         };
+    }
+
+    /// <summary>
+    /// 派工前先把使用者排隊中的補充併進提示；選「立刻套用」時中斷這一步、帶著補充重來。
+    /// </summary>
+    private async Task<string> RunWithNotesAsync(
+        ProviderId provider,
+        string workingDirectory,
+        string basePrompt,
+        Action<string> progress,
+        CancellationToken cancellationToken)
+    {
+        var carried = new List<string>();
+
+        for (var attempt = 0; ; attempt++)
+        {
+            carried.AddRange(_interaction.Notes.Take());
+            var prompt = ChangeTaskService.ComposeWithNotes(basePrompt, carried);
+
+            var step = _interaction.Notes.BeginStep(cancellationToken);
+            try
+            {
+                return await RunProviderAsync(provider, workingDirectory, prompt, step.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < 5)
+            {
+                progress($"依你的要求中斷 {provider.ToFriendlyName()} 這一步，帶著你的補充重新開始…");
+            }
+            finally
+            {
+                _interaction.Notes.EndStep(step);
+            }
+        }
     }
 
     private async Task<string> RunProviderAsync(

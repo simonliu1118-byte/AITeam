@@ -29,6 +29,9 @@ public sealed class MainWindow : Form
     private readonly Button _recheckButton = new();
     private readonly Button _sendButton = new();
     private readonly Button _stopButton = new();
+    private readonly CheckBox _pauseAfterImplement = new();
+    private readonly CheckBox _applyNoteNow = new();
+    private readonly Label _bottomHint = new();
     private readonly Button _projectButton = new();
     private readonly Button _historyButton = new();
     private readonly StatusBadge _modeBadge = new();
@@ -45,6 +48,8 @@ public sealed class MainWindow : Form
     private bool _taskRunning;
     // 這一次任務專用的取消來源；接在程式生命週期底下，關程式時也會一起取消。
     private CancellationTokenSource? _taskCts;
+    // 這一輪任務的留言板；任務沒在跑的時候是 null。
+    private TaskNoteBoard? _notes;
     private DateTime? _taskStartedAt;
     private DateTime? _stageStartedAt;
     private TaskProgress? _currentProgress;
@@ -232,16 +237,49 @@ public sealed class MainWindow : Form
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bottom.Controls.Add(new Label
+
+        // 左側是提示文字 + 一個依狀態切換的勾選框（待命時是檢查點，執行中是立刻套用）。
+        var hintArea = new TableLayoutPanel
         {
-            Text = "任務執行中仍可先輸入下一件；執行中可按「停止」中止本次任務。",
-            AutoSize = false,
-            AutoEllipsis = true,
             Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = SecondaryText,
-            Margin = new Padding(2, 0, 10, 0)
-        }, 0, 0);
+            ColumnCount = 1,
+            RowCount = 3,
+            Margin = new Padding(2, 0, 10, 0),
+            BackColor = AppBackground
+        };
+        hintArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        // 兩個勾選框各佔一列（同時只會有一個是可見的）：TableLayoutPanel 一格只能放一個控制項，
+        // 硬塞兩個會被擠到下一格去。隱藏的那一列是 AutoSize，不會佔到高度。
+        hintArea.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        hintArea.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        hintArea.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        _bottomHint.Text = "送出後仍可在上面輸入補充，按「補充說明」加進目前任務。";
+        _bottomHint.AutoSize = false;
+        _bottomHint.AutoEllipsis = true;
+        _bottomHint.Dock = DockStyle.Top;
+        _bottomHint.Height = 20;
+        _bottomHint.TextAlign = ContentAlignment.MiddleLeft;
+        _bottomHint.ForeColor = SecondaryText;
+        _bottomHint.Margin = Padding.Empty;
+        hintArea.Controls.Add(_bottomHint, 0, 0);
+
+        _pauseAfterImplement.Text = "實作完成後先讓我看過（只影響修改任務）";
+        _pauseAfterImplement.AutoSize = true;
+        _pauseAfterImplement.ForeColor = SecondaryText;
+        _pauseAfterImplement.Font = new Font("Microsoft JhengHei UI", 9F);
+        _pauseAfterImplement.Margin = new Padding(0, 2, 0, 0);
+        hintArea.Controls.Add(_pauseAfterImplement, 0, 1);
+
+        _applyNoteNow.Text = "立刻中斷目前這一步並套用補充";
+        _applyNoteNow.AutoSize = true;
+        _applyNoteNow.ForeColor = SecondaryText;
+        _applyNoteNow.Font = new Font("Microsoft JhengHei UI", 9F);
+        _applyNoteNow.Margin = new Padding(0, 2, 0, 0);
+        _applyNoteNow.Visible = false;
+        hintArea.Controls.Add(_applyNoteNow, 0, 2);
+
+        bottom.Controls.Add(hintArea, 0, 0);
 
         _sendButton.Text = "送出";
         _sendButton.AutoSize = false;
@@ -677,7 +715,13 @@ public sealed class MainWindow : Form
 
     private async Task HandleSendAsync()
     {
-        if (_taskRunning || string.IsNullOrWhiteSpace(_requestBox.Text)) return;
+        if (string.IsNullOrWhiteSpace(_requestBox.Text)) return;
+        if (_taskRunning)
+        {
+            AddNoteToRunningTask();
+            return;
+        }
+
         if (_projectBox.SelectedItem is not ProjectEntry project)
         {
             MessageBox.Show("請先選擇專案。", "AITeam", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -700,6 +744,8 @@ public sealed class MainWindow : Form
 
         _taskCts?.Dispose();
         _taskCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+        _notes = new TaskNoteBoard();
+        var interaction = new TaskInteraction(_notes, _pauseAfterImplement.Checked, AskCheckpointAsync);
 
         try
         {
@@ -711,6 +757,7 @@ public sealed class MainWindow : Form
                 text => AppendLog(text),
                 ReportStage,
                 ReportActivity,
+                interaction,
                 _taskCts.Token);
 
             if (result.Intent == RequestIntent.Change && result.Change is { } change)
@@ -984,12 +1031,59 @@ public sealed class MainWindow : Form
     private void SetTaskRunning(bool running)
     {
         _taskRunning = running;
-        _sendButton.Text = running ? "執行中…" : "送出";
+        // 執行中「送出」變成「補充說明」：任務跑到一半還是可以把話加進去，
+        // 這是定案之後使用者唯一能插嘴的管道。
+        _sendButton.Text = running ? "補充說明" : "送出";
         _projectButton.Enabled = !running;
         _projectBox.Enabled = !running;
         _stopButton.Enabled = running;
         _stopButton.Cursor = running ? Cursors.Hand : Cursors.Default;
+        _pauseAfterImplement.Visible = !running;
+        _applyNoteNow.Visible = running;
+        _bottomHint.Text = running
+            ? "在上面輸入補充，按「補充說明」加進目前任務。"
+            : "送出後仍可在上面輸入補充，按「補充說明」加進目前任務。";
+        if (!running)
+        {
+            _notes = null;
+            _applyNoteNow.Checked = false;
+        }
         RefreshSendButton();
+    }
+
+    /// <summary>
+    /// 把使用者在任務執行中打的話交給留言板。沒勾「立刻套用」就排隊，等下一步派工前併進提示；
+    /// 勾了就中斷目前這一步、帶著補充重來。
+    /// </summary>
+    private void AddNoteToRunningTask()
+    {
+        var note = _requestBox.Text.Trim();
+        if (note.Length == 0 || _notes is null) return;
+
+        var immediate = _applyNoteNow.Checked;
+        _notes.Add(note, immediate);
+        _requestBox.Clear();
+
+        AppendLog(immediate
+            ? $"已收到你的補充，立刻中斷目前這一步並套用：{note}"
+            : $"已收到你的補充，下一步開始前會一併交給 AI：{note}");
+    }
+
+    /// <summary>實作完成後的確認點；只有送出時勾了「先讓我看過」才會被呼叫。</summary>
+    private Task<CheckpointResponse> AskCheckpointAsync(CheckpointPrompt prompt, CancellationToken cancellationToken)
+    {
+        var response = InvokeRequired
+            ? (CheckpointResponse?)Invoke(new Func<CheckpointResponse?>(() => ShowCheckpointDialog(prompt)))
+            : ShowCheckpointDialog(prompt);
+
+        // 關掉視窗而不按任何按鈕，等於什麼都不決定；當成繼續比當成中止安全。
+        return Task.FromResult(response ?? new CheckpointResponse(CheckpointAction.Continue));
+    }
+
+    private CheckpointResponse? ShowCheckpointDialog(CheckpointPrompt prompt)
+    {
+        using var dialog = new CheckpointDialog(prompt);
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Response : null;
     }
 
     /// <summary>
@@ -1022,7 +1116,8 @@ public sealed class MainWindow : Form
 
     private void RefreshSendButton()
     {
-        var canSend = !_taskRunning && !string.IsNullOrWhiteSpace(_requestBox.Text);
+        // 執行中一樣可以按（那時候是「補充說明」），所以只看有沒有打字。
+        var canSend = !string.IsNullOrWhiteSpace(_requestBox.Text);
         _sendButton.Enabled = canSend;
         _sendButton.BackColor = canSend ? Accent : Color.FromArgb(181, 190, 200);
         _sendButton.Cursor = canSend ? Cursors.Hand : Cursors.Default;
