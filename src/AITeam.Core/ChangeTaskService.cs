@@ -86,6 +86,14 @@ public sealed class ChangeTaskService
         var defaultBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
         var baseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
 
+        // 修改任務最後一定要升版號，所以版本檔有問題就不可能完成。這件事以前是在
+        // 升版號那一步才發現，那時候調查、規劃、實作、審查全跑完了，額度也燒掉了。
+        // 現在在開任何工作區、派任何工作之前就先擋下來。
+        var versionProblem = ProjectPreflight.DescribeVersionFileProblem(project.PhysicalPath);
+        if (versionProblem is not null)
+            throw new InvalidOperationException(
+                versionProblem + " 修改任務一定會需要升版號，因此在開始派工前就先停下來，不會白白消耗 AI 額度。");
+
         var taskId = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6];
         var worktreesRoot = Path.Combine(_runtimeRoot, "worktrees");
         Directory.CreateDirectory(worktreesRoot);
@@ -649,15 +657,16 @@ public sealed class ChangeTaskService
         VersionBump bump,
         CancellationToken cancellationToken)
     {
-        var versionPath = Path.GetFullPath(Path.Combine(workingDirectory, "VERSION"));
-        var projectRoot = Path.GetFullPath(workingDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!versionPath.StartsWith(projectRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(versionPath))
-            throw new InvalidOperationException("此專案根目錄找不到 VERSION 檔。依共用規則，每個可發行專案根目錄都必須有 VERSION 檔（內容只放 X.Y.Z），AITeam 不會自行猜測版本規則，因此已停止正式化並保留工作區。");
+        // 開工前已經檢查過一次，這裡是最後一道防線：實作階段有可能把 VERSION 改壞或刪掉。
+        var problem = ProjectPreflight.DescribeVersionFileProblem(workingDirectory);
+        if (problem is not null)
+            throw new InvalidOperationException(problem + " 已停止正式化並保留工作區。");
 
+        var versionPath = Path.Combine(workingDirectory, ProjectPreflight.VersionFileName);
         var current = (await File.ReadAllTextAsync(versionPath, cancellationToken)).Trim();
         var match = Regex.Match(current, "^(?<maj>\\d+)\\.(?<min>\\d+)\\.(?<pat>\\d+)$");
         if (!match.Success)
-            throw new InvalidOperationException($"版本檔目前為「{current}」，不是單純 X.Y.Z。AITeam v0.5.0 不會猜測 prerelease/特殊版號規則，因此已停止正式化並保留工作區。");
+            throw new InvalidOperationException($"版本檔目前為「{current}」，不是單純 X.Y.Z。已停止正式化並保留工作區。");
 
         var major = int.Parse(match.Groups["maj"].Value);
         var minor = int.Parse(match.Groups["min"].Value);
