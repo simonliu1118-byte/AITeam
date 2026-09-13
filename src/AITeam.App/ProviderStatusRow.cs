@@ -34,13 +34,15 @@ public sealed class ProviderStatusRow
         _statusLabel.Anchor = AnchorStyles.Left;
         _statusLabel.Margin = new Padding(0, 9, 12, 9);
 
-        // 說明欄用固定空間：填滿剩餘寬度，文字放不下時先折行（最多兩行），
-        // 還是放不下就自動降字級，確保整段文字一定完整顯示，不裁切也不縮寫成 …。
+        // 說明欄用固定空間：填滿剩餘寬度、一律單行，放不下就自動降字級，
+        // 確保整段文字一定完整顯示，不折行、不裁切，也不縮寫成 …。
         // 也不能用 AutoSize，否則文字長度會變成整張卡片的最小寬度，
         // 視窗變窄時整列會撐出容器右緣被裁掉。
         _detailLabel.Dock = DockStyle.Fill;
         _detailLabel.Font = new Font("Microsoft JhengHei UI", 9F);
         _detailLabel.ForeColor = SecondaryText;
+        // 明確跟著卡片的白底，不要留給系統預設（會變成灰底色塊）。
+        _detailLabel.BackColor = Color.White;
         _detailLabel.Margin = new Padding(0, 2, 10, 2);
 
         _enabledCheck.Text = "本次使用";

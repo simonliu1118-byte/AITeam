@@ -1,18 +1,17 @@
 namespace AITeam;
 
 /// <summary>
-/// 固定空間的說明文字。先在目前寬度內折行（最多兩行），若還是放不下就自動降字級，
-/// 直到整段文字完整顯示為止；不會裁掉文字，也不會縮寫成「…」。
+/// 固定空間的說明文字，一律單行顯示：寬度不夠時自動降字級，直到整段文字放得下為止。
+/// 不折行、不裁字，也不會縮寫成「…」。
 /// </summary>
 public sealed class AutoFitLabel : Control
 {
     private const float MaxFontSize = 9F;
-    private const float MinFontSize = 6F;
+    private const float MinFontSize = 5.5F;
     private const float FontStep = 0.5F;
-    private const int MaxLines = 2;
 
     private const TextFormatFlags Format =
-        TextFormatFlags.WordBreak |
+        TextFormatFlags.SingleLine |
         TextFormatFlags.Left |
         TextFormatFlags.VerticalCenter |
         TextFormatFlags.NoPadding;
@@ -21,8 +20,9 @@ public sealed class AutoFitLabel : Control
     {
         DoubleBuffered = true;
         ResizeRedraw = true;
-        // 保證永遠留得下兩行最大字級的高度，讓折行後不會被上下裁掉。
-        MinimumSize = new Size(0, (int)Math.Ceiling(MaxFontSize * 1.9F) * MaxLines);
+        // 這個控制項畫在卡片上，背景要跟著卡片走；不設定的話會吃到系統預設的灰底。
+        SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent;
     }
 
     protected override void OnTextChanged(EventArgs e)
@@ -40,9 +40,8 @@ public sealed class AutoFitLabel : Control
         for (var size = MaxFontSize; size >= MinFontSize; size -= FontStep)
         {
             using var candidate = new Font(Font.FontFamily, size, Font.Style);
-            var wrapped = TextRenderer.MeasureText(e.Graphics, Text, candidate, new Size(bounds.Width, int.MaxValue), Format);
-            var lineHeight = TextRenderer.MeasureText(e.Graphics, "字", candidate, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Height;
-            if (wrapped.Height <= Math.Min(bounds.Height, lineHeight * MaxLines))
+            var measured = TextRenderer.MeasureText(e.Graphics, Text, candidate, new Size(int.MaxValue, int.MaxValue), Format);
+            if (measured.Width <= bounds.Width && measured.Height <= bounds.Height)
             {
                 TextRenderer.DrawText(e.Graphics, Text, candidate, bounds, ForeColor, Format);
                 return;

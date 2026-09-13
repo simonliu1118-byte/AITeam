@@ -151,7 +151,11 @@ public sealed class ProviderHealthService
                 timeout,
                 cancellationToken);
 
-            if (successPredicate(result))
+            // 三家 CLI 都可能在「看起來成功」的輸出裡夾帶限額訊息（正常結束、也有完成事件），
+            // 只看各自的成功訊號會把超過限額誤判成上線，接著把工作派給它然後失敗。
+            // 因此不管哪一家，先排除帶有限額訊息的輸出。
+            var quotaHit = LooksLikeQuota(result.StandardOutput) || LooksLikeQuota(result.StandardError);
+            if (!quotaHit && successPredicate(result))
             {
                 return new ProviderHealth(provider, ProviderHealthState.Online, "上線", result.Duration);
             }
@@ -182,29 +186,9 @@ public sealed class ProviderHealthService
         string text,
         TimeSpan duration)
     {
-        // CLI 的訊息有兩種寫法：給人看的句子（"usage limit reached"）與 API 機器代碼
-        // （"rate_limit_error"、"resource_exhausted"）。先把底線與連字號正規化成空白，
-        // 同一組關鍵字才能同時比對到兩種寫法，不會因為寫法不同就誤判成一般錯誤。
         var lower = Normalize(text);
 
-        if (ContainsAny(lower,
-                "usage limit",
-                "quota",
-                "rate limit",
-                "resource exhausted",
-                "too many requests",
-                "credit",
-                "limit reached",
-                "limit exceeded",
-                "exceeded your",
-                "reached your limit",
-                "try again at",
-                "resets at",
-                "upgrade your plan",
-                "429 too many",
-                "error 429",
-                "status 429",
-                "http 429"))
+        if (LooksLikeQuota(text) || ContainsAny(lower, "credit", "try again at", "resets at"))
         {
             return new ProviderHealth(provider, ProviderHealthState.Quota, "超過限額", duration);
         }
@@ -246,6 +230,30 @@ public sealed class ProviderHealthService
             string.IsNullOrWhiteSpace(firstLine) ? "異常" : firstLine,
             duration);
     }
+
+    /// <summary>
+    /// 限額訊息的判斷。CLI 有兩種寫法：給人看的句子（"usage limit reached"）與 API 機器代碼
+    /// （"rate_limit_error"、"resource_exhausted"）。比對前先把底線與連字號正規化成空白，
+    /// 同一組關鍵字才能同時吃到兩種寫法。
+    /// </summary>
+    internal static bool LooksLikeQuota(string text) => ContainsAny(
+        Normalize(text),
+        "usage limit",
+        "quota",
+        "rate limit",
+        "resource exhausted",
+        "too many requests",
+        "limit reached",
+        "limit exceeded",
+        "exceeded your",
+        "reached your limit",
+        "upgrade your plan",
+        "out of credit",
+        "insufficient credit",
+        "429 too many",
+        "error 429",
+        "status 429",
+        "http 429");
 
     internal static bool IsJsonErrorResult(string output)
     {
