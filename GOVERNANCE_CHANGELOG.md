@@ -1,5 +1,13 @@
 # AITeam Governance Changelog
 
+## 2.7.0 — 2026/09/13
+
+- 共通規則升級至 2.4.0，統一 Build／Test workflow 預設採 `pull_request` + `workflow_dispatch`。
+- Draft PR 可以正常執行 CI；Draft 只代表尚未準備合併，不再作為 CI 開關，也不需要為了驗證反覆切換 Draft／Ready。
+- 取消「以 manual-only workflow 節省 CI」的共通方向；節省成本改由 Local-first、集中修改、減少 push、path filter 與 concurrency 實現。
+- 一般 branch push 不另跑第二套完整昂貴 Build／Test；已有 PR 時由 PR workflow 驗收，`workflow_dispatch` 留作人工／特殊備援。
+- 此模型讓 AI 不需要具備 GitHub `Run workflow` 操作權限，完成一輪合理修改並 push 到已有 PR 即可取得遠端驗收結果。
+
 ## 2.6.0 — 2026/09/13
 
 - 共通規則升級至 2.3.0，依使用者決定將 Wade–Giles（威妥瑪）恢復並明確定義為全域共通羅馬拼音規則。
