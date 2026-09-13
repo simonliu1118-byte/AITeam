@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using AITeam.Models;
 using AITeam.Services;
 
@@ -13,6 +14,9 @@ public sealed class ProjectManagerForm : Form
     private static readonly Color Danger = Color.FromArgb(176, 54, 54);
     private static readonly Color DangerBorder = Color.FromArgb(227, 195, 195);
     private static readonly Color MetaBackground = Color.FromArgb(247, 249, 251);
+    private static readonly Color SelectedItemBackground = Color.FromArgb(234, 241, 248);
+    private static readonly Font ListItemFont = new("Microsoft JhengHei UI", 9.5F);
+    private static readonly Font ListItemSelectedFont = new("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
 
     private readonly ProjectRegistryService _registry;
     private readonly KnownRepositoryService _knownRepos;
@@ -144,6 +148,9 @@ public sealed class ProjectManagerForm : Form
         _projectList.BorderStyle = BorderStyle.None;
         _projectList.IntegralHeight = false;
         _projectList.Margin = new Padding(0, 0, 0, 8);
+        _projectList.DrawMode = DrawMode.OwnerDrawFixed;
+        _projectList.ItemHeight = 34;
+        _projectList.DrawItem += DrawProjectListItem;
         _projectList.SelectedIndexChanged += (_, _) =>
         {
             if (_suppressSelection) return;
@@ -167,6 +174,52 @@ public sealed class ProjectManagerForm : Form
 
         card.Controls.Add(panel);
         return card;
+    }
+
+    private void DrawProjectListItem(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0 || e.Index >= _projectList.Items.Count) return;
+
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var background = new SolidBrush(Color.White))
+            e.Graphics.FillRectangle(background, e.Bounds);
+
+        var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+        var cardBounds = new Rectangle(e.Bounds.X, e.Bounds.Y + 1, Math.Max(1, e.Bounds.Width - 2), Math.Max(1, e.Bounds.Height - 4));
+        if (selected)
+        {
+            using var path = CreateRoundedPath(cardBounds, 7);
+            using var fill = new SolidBrush(SelectedItemBackground);
+            e.Graphics.FillPath(fill, path);
+        }
+
+        var name = (_projectList.Items[e.Index] as ProjectEntry)?.Name ?? "";
+        var textBounds = new Rectangle(cardBounds.X + 10, cardBounds.Y, cardBounds.Width - 16, cardBounds.Height);
+        TextRenderer.DrawText(
+            e.Graphics,
+            name,
+            selected ? ListItemSelectedFont : ListItemFont,
+            textBounds,
+            selected ? Accent : PrimaryText,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+    }
+
+    private static GraphicsPath CreateRoundedPath(Rectangle rect, int radius)
+    {
+        var path = new GraphicsPath();
+        var d = radius * 2;
+        if (rect.Width <= d || rect.Height <= d)
+        {
+            path.AddRectangle(rect);
+            path.CloseFigure();
+            return path;
+        }
+        path.AddArc(rect.Left, rect.Top, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Top, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     private Control BuildEditorPanel()

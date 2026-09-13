@@ -1,3 +1,4 @@
+using System.Reflection;
 using AITeam.Models;
 using AITeam.Services;
 
@@ -124,10 +125,9 @@ public sealed class MainWindow : Form
             Location = new Point(22, 13)
         };
 
-        var v = typeof(MainWindow).Assembly.GetName().Version;
         var version = new Label
         {
-            Text = v is null ? "v0.4.0" : $"v{v.Major}.{v.Minor}.{Math.Max(0, v.Build)}",
+            Text = ResolveVersionText(),
             AutoSize = true,
             Font = new Font("Microsoft JhengHei UI", 9F),
             ForeColor = SecondaryText,
@@ -445,10 +445,35 @@ public sealed class MainWindow : Form
         _outputBox.BorderStyle = BorderStyle.None;
         _outputBox.BackColor = CardBackground;
         _outputBox.ForeColor = Color.FromArgb(55, 62, 70);
-        _outputBox.Font = new Font("Microsoft JhengHei UI", 9.5F);
+        _outputBox.Font = new Font("Microsoft JhengHei UI", 9F);
         _outputBox.DetectUrls = false;
         logCard.Controls.Add(_outputBox);
         layout.Controls.Add(logCard, 0, 3);
+    }
+
+    private static string ResolveVersionText()
+    {
+        // 版號來自建置時嵌入的 InformationalVersion（格式：X.Y.Z+build.N），
+        // 依共用規則顯示成 VX.Y.Z，Build 大於 0 時顯示成 VX.Y.Z Build N。
+        var informational = typeof(MainWindow).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            var parts = informational.Split('+', 2);
+            var baseVersion = parts[0];
+            if (parts.Length == 2 &&
+                parts[1].StartsWith("build.", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(parts[1]["build.".Length..], out var build) &&
+                build > 0)
+            {
+                return $"V{baseVersion} Build {build}";
+            }
+            return $"V{baseVersion}";
+        }
+
+        var v = typeof(MainWindow).Assembly.GetName().Version;
+        return v is null ? "V0.0.0" : $"V{v.Major}.{v.Minor}.{Math.Max(0, v.Build)}";
     }
 
     private static Label SectionTitle(string text, Padding margin) => new()

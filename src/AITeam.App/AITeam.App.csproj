@@ -1,5 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    版號唯一來源是 repo 根目錄的 VERSION 與 BUILD 兩個檔案（共用規則第 6 節），
+    這裡直接讀進來組版號，避免 csproj 另外寫死一份、忘了同步時畫面顯示舊版號。
+  -->
+  <PropertyGroup>
+    <_VersionFileText>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../VERSION'))</_VersionFileText>
+    <_BuildFileText>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../BUILD'))</_BuildFileText>
+    <ProductBaseVersion>$(_VersionFileText.Trim())</ProductBaseVersion>
+    <ProductBuildCounter>$(_BuildFileText.Trim())</ProductBuildCounter>
+    <Version>$(ProductBaseVersion)</Version>
+    <FileVersion>$(ProductBaseVersion).0</FileVersion>
+    <AssemblyVersion>$(ProductBaseVersion).0</AssemblyVersion>
+    <InformationalVersion>$(ProductBaseVersion)+build.$(ProductBuildCounter)</InformationalVersion>
+  </PropertyGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -8,9 +23,6 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AITeam</AssemblyName>
     <RootNamespace>AITeam</RootNamespace>
-    <Version>0.14.0</Version>
-    <FileVersion>0.14.0.0</FileVersion>
-    <AssemblyVersion>0.14.0.0</AssemblyVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>AITeam.ico</ApplicationIcon>
