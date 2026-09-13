@@ -46,6 +46,7 @@ public sealed class InquiryService
         IReadOnlyList<ProviderId> candidates,
         Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
+        Action<TaskProgress> onStage,
         CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
@@ -59,9 +60,11 @@ public sealed class InquiryService
 
         try
         {
+            onStage(new TaskProgress(TaskKind.Inquiry, TaskStage.Prepare, TaskActivity.Running, "同步 GitHub 預設分支、確認本機 Repo 狀態"));
             progress("同步 GitHub 預設分支並確認本機 Repo 安全狀態…");
             await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
+            onStage(new TaskProgress(TaskKind.Inquiry, TaskStage.Prepare, TaskActivity.Running, "建立唯讀查詢隔離區"));
             progress("建立唯讀查詢隔離區…");
             var add = await _runner.RunAsync(
                 "git",
@@ -86,6 +89,7 @@ public sealed class InquiryService
             foreach (var provider in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                onStage(new TaskProgress(TaskKind.Inquiry, TaskStage.Inquire, TaskActivity.Running, "讀取專案並判斷需求", provider));
                 progress($"{provider.ToFriendlyName()} 正在讀取專案並判斷需求…");
                 try
                 {
@@ -105,6 +109,7 @@ public sealed class InquiryService
                                 candidates,
                                 askUser,
                                 progress,
+                                onStage,
                                 cancellationToken);
 
                             var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";

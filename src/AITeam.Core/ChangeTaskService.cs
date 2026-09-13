@@ -69,14 +69,19 @@ public sealed class ChangeTaskService
         IReadOnlyList<ProviderId> availableProviders,
         Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
+        Action<TaskProgress> onStage,
         CancellationToken cancellationToken)
     {
+        void Stage(TaskStage stage, string detail, ProviderId? who = null, int round = 0) =>
+            onStage(new TaskProgress(TaskKind.Change, stage, TaskActivity.Running, detail, who, round));
+
         var available = availableProviders.Distinct().ToList();
         if (available.Count < 2)
             throw new InvalidOperationException("修改任務至少需要兩個可用 AI，才能保留獨立實作與審查。請先恢復至少兩個 AI 後再送出。");
         if (!Directory.Exists(project.RepoPath))
             throw new DirectoryNotFoundException($"找不到專案 Repo：{project.RepoPath}");
 
+        Stage(TaskStage.Prepare, "同步 GitHub 預設分支、確認本機 Repo 狀態");
         progress("同步 GitHub 預設分支並確認本機 Repo 安全狀態…");
         var defaultBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
         var baseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
@@ -91,6 +96,7 @@ public sealed class ChangeTaskService
 
         try
         {
+            Stage(TaskStage.Prepare, "建立隔離工作區");
             progress("建立隔離工作區…");
             var add = await _runner.RunAsync(
                 "git",
@@ -115,6 +121,7 @@ public sealed class ChangeTaskService
                 progress($"⚠️ 目標專案偵測不到 GitHub Actions CI（推測技術棧：{techStackHint}）；本次計畫會一併要求補建最小可用的 CI。");
 
             var scout = Pick(available, ProviderId.Antigravity, ProviderId.Codex, ProviderId.Claude);
+            Stage(TaskStage.Scout, "讀取專案現況、蒐集證據", scout);
             progress($"{scout.ToFriendlyName()}：Scout / evidence…");
             var scoutReport = await RunReadOnlyAsync(
                 scout,
@@ -124,8 +131,9 @@ public sealed class ChangeTaskService
 
             var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
             var (plan, risk, bump) = await RunPlanGateDiscussionAsync(
-                project, request, scoutReport, planner, workingDirectory, hasCi, techStackHint, askUser, progress, cancellationToken);
+                project, request, scoutReport, planner, workingDirectory, hasCi, techStackHint, askUser, progress, onStage, cancellationToken);
 
+            Stage(TaskStage.Plan, "計畫已定案，重新鎖定基準版本", planner);
             progress("計畫已定案；重新同步 GitHub 預設分支並重新鎖定基準版本…");
             var refreshedBranch = await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
             var refreshedBaseSha = (await RunGitCheckedAsync(project.RepoPath, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
@@ -153,6 +161,7 @@ public sealed class ChangeTaskService
             }
 
             var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
+            Stage(TaskStage.Implement, "正在實作與測試", implementer);
             progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
             await RunWriteAsync(
                 implementer,
@@ -201,6 +210,7 @@ public sealed class ChangeTaskService
                     progress($"⚠️ 僅 2 個 AI 上線，本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
 
                 var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
+                Stage(TaskStage.Review, "獨立挑戰目前的修改", roundChallenger, round + 1);
                 progress($"{roundChallenger.ToFriendlyName()}：獨立 Challenge…");
                 var challenge = await RunReadOnlyAsync(
                     roundChallenger,
@@ -208,6 +218,7 @@ public sealed class ChangeTaskService
                     BuildChallengePrompt(request, plan, diff),
                     cancellationToken);
 
+                Stage(TaskStage.Review, "最終審查", roundFinal, round + 1);
                 progress($"{roundFinal.ToFriendlyName()}：Final Review…");
                 finalReview = await RunReadOnlyAsync(
                     roundFinal,
@@ -227,6 +238,7 @@ public sealed class ChangeTaskService
                 var repairer = available.Contains(implementer)
                     ? implementer
                     : Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
+                Stage(TaskStage.Review, "依審查意見修正", repairer, round + 1);
                 progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
                 var repairResult = await RunWriteAsync(
                     repairer,
@@ -277,6 +289,7 @@ public sealed class ChangeTaskService
             var commitMessage = "AITeam: " + OneLine(request, 72);
             await RunGitCheckedAsync(worktreeRoot, new[] { "commit", "-m", commitMessage }, cancellationToken);
 
+            Stage(TaskStage.Verify, "推送分支並開啟 PR", implementer);
             progress($"推送任務分支 {taskBranch} 並開啟 PR…");
             var pushTask = await _runner.RunAsync(
                 "git",
@@ -309,6 +322,7 @@ public sealed class ChangeTaskService
             {
                 for (var ciRound = 0; ; ciRound++)
                 {
+                    Stage(TaskStage.Verify, $"等待 GitHub CI 檢查結果（PR #{prNumber}）", round: ciRound + 1);
                     progress($"等待 {project.GitHubRepo} 的 CI 檢查結果…");
                     var (ciPassed, ciSummary) = await WaitForPrChecksAsync(project, prNumber, cancellationToken);
                     if (ciPassed)
@@ -321,6 +335,7 @@ public sealed class ChangeTaskService
                         throw new InvalidOperationException(
                             $"CI 連續 {_workflow.MaxCiRepairRounds} 輪修正後仍未通過。PR 已保留供人工檢查，不會自動合併：{prUrl}");
 
+                    Stage(TaskStage.Verify, "依 CI 失敗訊息修正", implementer, ciRound + 1);
                     progress($"CI 檢查失敗；{implementer.ToFriendlyName()} 依失敗訊息進行第 {ciRound + 1} 輪修正…");
                     await RunWriteAsync(
                         implementer,
@@ -348,12 +363,16 @@ public sealed class ChangeTaskService
 
             if (risk == ChangeRisk.High)
             {
+                onStage(new TaskProgress(
+                    TaskKind.Change, TaskStage.Merge, TaskActivity.WaitingForUser,
+                    $"高風險變更，需要你到 GitHub 人工確認合併（PR #{prNumber}）"));
                 progress($"⚠️ 高風險變更，需要人工確認合併：{prUrl}");
                 await WaitForManualMergeAsync(project, prNumber, cancellationToken);
                 progress("偵測到 PR 已由人工合併。");
             }
             else
             {
+                Stage(TaskStage.Merge, "合併 PR");
                 progress("風險等級允許自動合併，執行合併…");
                 await MergePullRequestAsync(project, prNumber, cancellationToken);
                 progress("PR 已自動合併。");
@@ -432,6 +451,7 @@ public sealed class ChangeTaskService
         string techStackHint,
         Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
+        Action<TaskProgress> onStage,
         CancellationToken cancellationToken)
     {
         var discussion = new StringBuilder();
@@ -440,6 +460,7 @@ public sealed class ChangeTaskService
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            onStage(new TaskProgress(TaskKind.Change, TaskStage.Plan, TaskActivity.Running, "擬定計畫、判斷風險與版號等級", planner));
             progress($"{planner.ToFriendlyName()}：Plan Gate / risk…");
             var reply = await RunReadOnlyAsync(
                 planner,
@@ -450,6 +471,7 @@ public sealed class ChangeTaskService
             if (!mustFinalize && IsPlanGateNeedsInput(reply))
             {
                 var question = ExtractPlanGateBody(reply);
+                onStage(new TaskProgress(TaskKind.Change, TaskStage.Plan, TaskActivity.WaitingForUser, "在規劃階段有問題要問你", planner));
                 progress("Plan Gate 提出問題，等待使用者回覆…");
                 var response = await askUser(new PlanGatePrompt(PlanGateStage.NeedsInput, question), cancellationToken);
 
@@ -480,6 +502,7 @@ public sealed class ChangeTaskService
                 return (plan, risk, bump);
             }
 
+            onStage(new TaskProgress(TaskKind.Change, TaskStage.Plan, TaskActivity.WaitingForUser, "計畫已擬好，等你確認定案", planner));
             progress("Plan Gate 認為計畫已可定案，等待使用者確認…");
             var confirmation = await askUser(new PlanGatePrompt(PlanGateStage.ReadyForConfirmation, plan), cancellationToken);
 
