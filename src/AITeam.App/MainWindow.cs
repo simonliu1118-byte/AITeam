@@ -17,6 +17,7 @@ public sealed class MainWindow : Form
     private readonly ProjectRegistryService _projectRegistry;
     private readonly ProviderHealthService _providerHealth;
     private readonly InquiryService _inquiryService;
+    private readonly TaskHistoryService _taskHistory;
     private readonly CancellationTokenSource _lifetimeCts = new();
 
     private readonly ComboBox _projectBox = new();
@@ -27,6 +28,7 @@ public sealed class MainWindow : Form
     private readonly Button _recheckButton = new();
     private readonly Button _sendButton = new();
     private readonly Button _projectButton = new();
+    private readonly Button _historyButton = new();
     private readonly StatusBadge _modeBadge = new();
     private readonly Label _currentTaskState = new();
     private readonly Label _taskClock = new();
@@ -41,6 +43,9 @@ public sealed class MainWindow : Form
     private DateTime? _stageStartedAt;
     private TaskProgress? _currentProgress;
     private TaskKind? _stageKind;
+    private readonly System.Text.StringBuilder _taskLog = new();
+    private string _taskRequest = "";
+    private string _taskProjectName = "";
 
     public MainWindow(string runtimeRoot)
     {
@@ -49,6 +54,7 @@ public sealed class MainWindow : Form
         _projectRegistry = new ProjectRegistryService(runtimeRoot);
         _providerHealth = new ProviderHealthService(runtimeRoot, runner);
         _inquiryService = new InquiryService(runtimeRoot, runner);
+        _taskHistory = new TaskHistoryService(runtimeRoot);
 
         Text = "AITeam";
         StartPosition = FormStartPosition.CenterScreen;
@@ -401,7 +407,22 @@ public sealed class MainWindow : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         parent.Controls.Add(layout);
 
-        layout.Controls.Add(SectionTitle("目前任務", new Padding(2, 0, 0, 7)), 0, 0);
+        var currentTitleRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
+        currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        currentTitleRow.Controls.Add(SectionTitle("目前任務", new Padding(2, 4, 0, 7)), 0, 0);
+
+        _historyButton.Text = "歷史任務";
+        _historyButton.AutoSize = false;
+        _historyButton.Size = new Size(94, 30);
+        _historyButton.FlatStyle = FlatStyle.Flat;
+        _historyButton.BackColor = Color.White;
+        _historyButton.ForeColor = PrimaryText;
+        _historyButton.Margin = new Padding(0, 0, 2, 7);
+        _historyButton.FlatAppearance.BorderColor = BorderColor;
+        _historyButton.Click += (_, _) => OpenTaskHistory();
+        currentTitleRow.Controls.Add(_historyButton, 1, 0);
+        layout.Controls.Add(currentTitleRow, 0, 0);
 
         var currentCard = new RoundedCard
         {
@@ -444,14 +465,24 @@ public sealed class MainWindow : Form
         headRow.Controls.Add(_taskClock, 1, 0);
         currentLayout.Controls.Add(headRow, 0, 0);
 
+        // 任務內容框起來：原本整塊留白讓卡片看起來空空的，給它一個底色框就有邊界感。
+        var requestFrame = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(247, 249, 251),
+            Padding = new Padding(10, 8, 10, 8),
+            Margin = new Padding(0, 0, 0, 2)
+        };
         _currentTaskBox.Multiline = true;
         _currentTaskBox.ReadOnly = true;
         _currentTaskBox.BorderStyle = BorderStyle.None;
-        _currentTaskBox.BackColor = CardBackground;
+        _currentTaskBox.BackColor = Color.FromArgb(247, 249, 251);
         _currentTaskBox.ForeColor = PrimaryText;
         _currentTaskBox.Text = "尚未送出任務。";
         _currentTaskBox.Dock = DockStyle.Fill;
-        currentLayout.Controls.Add(_currentTaskBox, 0, 1);
+        _currentTaskBox.ScrollBars = ScrollBars.Vertical;
+        requestFrame.Controls.Add(_currentTaskBox);
+        currentLayout.Controls.Add(requestFrame, 0, 1);
 
         _stageStrip.Dock = DockStyle.Top;
         _stageStrip.BackColor = CardBackground;
@@ -624,6 +655,9 @@ public sealed class MainWindow : Form
         var request = _requestBox.Text.Trim();
         _currentTaskBox.Text = request;
         _requestBox.Clear();
+        _taskRequest = request;
+        _taskProjectName = project.Name;
+        _taskLog.Clear();
         StartTaskProgress();
         SetTaskRunning(true);
         _outputBox.Clear();
@@ -652,16 +686,19 @@ public sealed class MainWindow : Form
                 AppendLog("");
                 AppendLog(result.Answer);
             }
+            SaveTaskHistory(TaskOutcome.Completed, result.Subject, result.Answer);
         }
         catch (OperationCanceledException)
         {
             FailTaskProgress("已取消");
             AppendLog("任務已取消。");
+            SaveTaskHistory(TaskOutcome.Cancelled, "", "任務已取消。");
         }
         catch (Exception ex)
         {
             FailTaskProgress("執行失敗");
             AppendLog("[ERROR] " + ex.Message);
+            SaveTaskHistory(TaskOutcome.Failed, "", ex.Message);
         }
         finally
         {
@@ -892,12 +929,56 @@ public sealed class MainWindow : Form
         _outputBox.SelectionStart = _outputBox.TextLength;
         _outputBox.SelectionLength = 0;
         _outputBox.SelectionFont = _outputBox.Font;
-        if (text.Length == 0)
-            _outputBox.AppendText(Environment.NewLine);
-        else
-            _outputBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}\r\n");
+        var line = text.Length == 0 ? Environment.NewLine : $"[{DateTime.Now:HH:mm:ss}] {text}\r\n";
+        _outputBox.AppendText(line);
+        _taskLog.Append(line);
 
         _outputBox.SelectionStart = _outputBox.TextLength;
         _outputBox.ScrollToCaret();
+    }
+
+    private void OpenTaskHistory()
+    {
+        using var form = new TaskHistoryForm(_taskHistory);
+        form.ShowDialog(this);
+    }
+
+    private void SaveTaskHistory(TaskOutcome outcome, string subject, string result)
+    {
+        if (_taskStartedAt is not { } startedAt) return;
+
+        try
+        {
+            _taskHistory.Save(
+                new TaskHistoryEntry
+                {
+                    Id = startedAt.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6],
+                    ProjectName = _taskProjectName,
+                    Subject = string.IsNullOrWhiteSpace(subject) ? FallbackSubject(_taskRequest) : subject,
+                    Request = _taskRequest,
+                    Kind = _stageKind ?? TaskKind.Inquiry,
+                    Outcome = outcome,
+                    StartedAt = startedAt,
+                    FinishedAt = DateTime.Now,
+                    Result = result
+                },
+                _taskLog.ToString());
+        }
+        catch (Exception ex)
+        {
+            // 寫不進歷史紀錄不該讓剛跑完的任務看起來像失敗，只在 log 說一聲。
+            AppendLog("[提醒] 這次任務的歷史紀錄寫入失敗：" + ex.Message);
+        }
+    }
+
+    /// <summary>AI 沒給主旨時的退路：取使用者輸入的開頭當標題。</summary>
+    private static string FallbackSubject(string request)
+    {
+        var firstLine = request
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()
+            ?.Trim() ?? "";
+        if (firstLine.Length == 0) return "（無標題任務）";
+        return firstLine.Length <= 24 ? firstLine : firstLine[..24] + "…";
     }
 }
