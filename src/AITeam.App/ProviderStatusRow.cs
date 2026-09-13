@@ -23,7 +23,7 @@ public sealed class ProviderStatusRow
         _nameLabel.ForeColor = PrimaryText;
         _nameLabel.Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold);
         _nameLabel.Anchor = AnchorStyles.Left;
-        _nameLabel.Margin = new Padding(0, 9, 18, 9);
+        _nameLabel.Margin = new Padding(0, 9, 12, 9);
 
         _lamp.Size = new Size(14, 14);
         _lamp.Anchor = AnchorStyles.Left;
@@ -32,16 +32,18 @@ public sealed class ProviderStatusRow
         _statusLabel.AutoSize = true;
         _statusLabel.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
         _statusLabel.Anchor = AnchorStyles.Left;
-        _statusLabel.Margin = new Padding(0, 9, 18, 9);
+        _statusLabel.Margin = new Padding(0, 9, 12, 9);
 
         // 說明欄不能用 AutoSize：AutoSize 的文字寬度會變成整張卡片的最小寬度，
-        // 視窗變窄時整列就會撐出容器右緣被裁掉。改成填滿剩餘空間、過長自動縮寫。
+        // 視窗變窄時整列就會撐出容器右緣被裁掉。改成填滿剩餘空間，寬度不夠時
+        // 用比較小的字級自動折成兩行（不縮寫成 …，這些字本來就是要給人看的）。
         _detailLabel.AutoSize = false;
-        _detailLabel.AutoEllipsis = true;
+        _detailLabel.AutoEllipsis = false;
         _detailLabel.Dock = DockStyle.Fill;
         _detailLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _detailLabel.Font = new Font("Microsoft JhengHei UI", 8.5F);
         _detailLabel.ForeColor = SecondaryText;
-        _detailLabel.Margin = new Padding(0, 4, 10, 4);
+        _detailLabel.Margin = new Padding(0, 2, 10, 2);
         // 非 AutoSize 控制項會拿目前尺寸當成偏好尺寸，起始尺寸放到最小，
         // 視窗很窄時這一欄才能被壓縮；實際寬度由 Dock=Fill 接手。
         _detailLabel.Size = new Size(1, 1);
