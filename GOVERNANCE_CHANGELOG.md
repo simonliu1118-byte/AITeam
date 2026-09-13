@@ -1,9 +1,15 @@
 # AITeam Governance Changelog
 
+## 2.6.0 — 2026/09/13
+
+- 共通規則升級至 2.3.0，依使用者決定將 Wade–Giles（威妥瑪）恢復並明確定義為全域共通羅馬拼音規則。
+- 公司或個人 repo 都遵守「中文名稱需要羅馬拼音時使用 Wade–Giles」；特定品牌／公司／產品固定英文 spelling 仍由各 repo 自己的 `REPO_POLICY.md`／`PROJECT_RULES.md` 定義。
+- 此調整不會把 CY 公司名稱、固定拼法或公司 copyright 帶入個人 sandbox。
+
 ## 2.5.0 — 2026/09/13
 
 - 共通規則升級至 2.2.0，將母本泛化為公司／個人 repository 都可使用的中性規則。
-- 公司名稱、公司命名／羅馬拼音、公司 copyright 與公司資料政策不再放在共通母本，改由各 repo 的 `REPO_POLICY.md` 定義。
+- 公司名稱、公司固定命名／拼法、公司 copyright 與公司資料政策不再放在共通母本，改由各 repo 的 `REPO_POLICY.md` 定義。
 - 個人用途 `simonliu1118-byte/sandbox` 正式納入 AITeam 共通規則同步體系；同步範圍仍只限 `REPOSITORY_RULES.md`、`COMMON_RULES_VERSION`、`COMMON_RULES_CHANGELOG.md`。
 - 明確要求同步到 sandbox 的共通母本不得含 CY 公司專屬內容；sandbox 自己的個人用途、安全、copyright 與 Release 差異由 sandbox `REPO_POLICY.md` 定義。
 
