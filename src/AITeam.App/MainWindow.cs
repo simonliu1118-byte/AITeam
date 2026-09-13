@@ -36,6 +36,8 @@ public sealed class MainWindow : Form
     private readonly Label _taskClock = new();
     private readonly TaskStageStrip _stageStrip = new();
     private readonly Label _stageDetail = new();
+    // 「AI 現在在做什麼」的即時一行；跟階段說明分開，階段換了就清掉。
+    private readonly AutoFitLabel _activityLabel = new();
     private readonly System.Windows.Forms.Timer _clockTimer = new() { Interval = 1000 };
     private readonly Dictionary<ProviderId, ProviderStatusRow> _providerCards = new();
 
@@ -50,6 +52,8 @@ public sealed class MainWindow : Form
     private readonly System.Text.StringBuilder _taskLog = new();
     private string _taskRequest = "";
     private string _taskProjectName = "";
+    // 即時活動可能一秒好幾行，太密的更新對畫面沒有幫助，節流到每 120ms 一次。
+    private DateTime _lastActivityAt = DateTime.MinValue;
 
     public MainWindow(string runtimeRoot)
     {
@@ -418,7 +422,7 @@ public sealed class MainWindow : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         // 卡片要放得下：狀態列 + 任務內容 + 階段進度條 + 目前動作說明
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 172F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 190F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         parent.Controls.Add(layout);
@@ -453,12 +457,13 @@ public sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Color.Transparent
         };
         currentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         currentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         currentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        currentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         currentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         currentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -516,6 +521,15 @@ public sealed class MainWindow : Form
         _stageDetail.Margin = new Padding(0, 2, 0, 0);
         _stageDetail.Visible = false;
         currentLayout.Controls.Add(_stageDetail, 0, 3);
+
+        _activityLabel.Dock = DockStyle.Top;
+        _activityLabel.Height = 17;
+        _activityLabel.Font = new Font("Microsoft JhengHei UI", 8.5F);
+        _activityLabel.ForeColor = Color.FromArgb(133, 142, 152);
+        _activityLabel.BackColor = CardBackground;
+        _activityLabel.Margin = new Padding(0, 1, 0, 0);
+        _activityLabel.Visible = false;
+        currentLayout.Controls.Add(_activityLabel, 0, 4);
 
         currentCard.Controls.Add(currentLayout);
         layout.Controls.Add(currentCard, 0, 1);
@@ -696,6 +710,7 @@ public sealed class MainWindow : Form
                 AskPlanGateAsync,
                 text => AppendLog(text),
                 ReportStage,
+                ReportActivity,
                 _taskCts.Token);
 
             if (result.Intent == RequestIntent.Change && result.Change is { } change)
@@ -767,12 +782,38 @@ public sealed class MainWindow : Form
         _currentTaskState.ForeColor = SecondaryText;
         _stageDetail.Text = "準備中…";
         _stageDetail.Visible = true;
+        _activityLabel.Text = "";
+        _activityLabel.Visible = true;
+        _lastActivityAt = DateTime.MinValue;
         _stageStrip.Visible = true;
         _stageStrip.Clear();
         _stageKind = null;
         _modeBadge.SetStatus("執行中", "", Color.FromArgb(255, 247, 225), Color.FromArgb(158, 104, 0), Color.FromArgb(214, 158, 46), Color.Empty);
         UpdateClock();
         _clockTimer.Start();
+    }
+
+    /// <summary>
+    /// Core 回報「AI 這一秒在做什麼」的進入點，來自讀取 CLI 輸出的背景執行緒。
+    /// 只更新畫面上那一行，不寫進執行紀錄——這種訊息量太大，寫進去會把紀錄洗掉。
+    /// </summary>
+    private void ReportActivity(string text)
+    {
+        if (InvokeRequired)
+        {
+            // 節流放在背景執行緒這一側：丟到 UI 執行緒之後會再進來一次，
+            // 那一次不能被自己剛剛寫下的時間戳擋掉。
+            var now = DateTime.UtcNow;
+            if ((now - _lastActivityAt).TotalMilliseconds < 120) return;
+            _lastActivityAt = now;
+
+            BeginInvoke(new Action<string>(ReportActivity), text);
+            return;
+        }
+
+        if (!_taskRunning) return;
+        _activityLabel.Text = text;
+        _activityLabel.Visible = true;
     }
 
     /// <summary>Core 回報階段變化的進入點，可能來自背景執行緒。</summary>
@@ -805,6 +846,8 @@ public sealed class MainWindow : Form
         var round = progress.Round > 1 ? $"（第 {progress.Round} 輪）" : "";
         _stageDetail.Text = who + progress.Detail + round;
         _stageDetail.Visible = true;
+        // 換階段了，上一個階段的即時動作就不要再留在畫面上。
+        _activityLabel.Text = "";
 
         _currentTaskState.Text = progress.Activity == TaskActivity.WaitingForUser ? "等你回覆" : "執行中";
         _currentTaskState.ForeColor = progress.Activity == TaskActivity.WaitingForUser ? Accent : SecondaryText;
@@ -825,6 +868,8 @@ public sealed class MainWindow : Form
         _currentTaskState.ForeColor = Color.FromArgb(36, 122, 72);
         _stageDetail.Text = "";
         _stageDetail.Visible = false;
+        _activityLabel.Text = "";
+        _activityLabel.Visible = false;
         _modeBadge.SetStatus("已完成", "", Color.FromArgb(236, 248, 240), Color.FromArgb(36, 122, 72), Color.FromArgb(46, 160, 92), Color.Empty);
         UpdateClock(totalOnly: true);
         if (Form.ActiveForm is null) FlashTaskbar();
@@ -837,6 +882,8 @@ public sealed class MainWindow : Form
         _currentTaskState.Text = stateText;
         _currentTaskState.ForeColor = Color.FromArgb(176, 54, 54);
         _stageDetail.Visible = false;
+        _activityLabel.Text = "";
+        _activityLabel.Visible = false;
         _modeBadge.SetStatus(stateText, "", Color.FromArgb(251, 237, 236), Color.FromArgb(176, 54, 54), Color.FromArgb(176, 54, 54), Color.Empty);
         UpdateClock(totalOnly: true);
         if (Form.ActiveForm is null) FlashTaskbar();

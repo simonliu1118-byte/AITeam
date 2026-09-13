@@ -28,6 +28,9 @@ public sealed class InquiryService
 {
     private readonly string _runtimeRoot;
     private readonly IProcessRunner _runner;
+
+    // 這一輪任務要把「AI 正在做什麼」送到哪裡；同一時間只會有一個任務在跑。
+    private Action<string>? _onActivity;
     private readonly ChangeTaskService _changeTaskService;
     private readonly GitRepositoryService _git;
     private readonly AgentsConfig _agents;
@@ -48,8 +51,11 @@ public sealed class InquiryService
         Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
         Action<string> progress,
         Action<TaskProgress> onStage,
+        Action<string> onActivity,
         CancellationToken cancellationToken)
     {
+        _onActivity = onActivity;
+
         if (candidates.Count == 0)
             throw new InvalidOperationException("目前沒有可用的 AI。請先重新檢查 AI 狀態。");
         if (!Directory.Exists(project.RepoPath))
@@ -111,6 +117,7 @@ public sealed class InquiryService
                                 askUser,
                                 progress,
                                 onStage,
+                                onActivity,
                                 cancellationToken);
 
                             var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";
@@ -163,6 +170,19 @@ public sealed class InquiryService
         }
     }
 
+    /// <summary>把某一家 CLI 的原始輸出行，翻成一句可讀的「現在在做什麼」再送出去。</summary>
+    private Action<string>? ActivitySink(ProviderId provider)
+    {
+        var sink = _onActivity;
+        if (sink is null) return null;
+
+        return line =>
+        {
+            var described = ProviderActivity.Describe(provider, line);
+            if (described is not null) sink($"{provider.ToFriendlyName()}：{described}");
+        };
+    }
+
     private async Task<string> RunProviderAsync(
         ProviderId provider,
         string workingDirectory,
@@ -200,7 +220,8 @@ public sealed class InquiryService
                 workingDirectory,
                 prompt,
                 TimeSpan.FromMinutes(5),
-                cancellationToken);
+                cancellationToken,
+                ActivitySink(ProviderId.Codex));
             if (result.ExitCode != 0)
                 throw new InvalidOperationException(DescribeFailure(result));
             if (File.Exists(lastMessage)) return await File.ReadAllTextAsync(lastMessage, cancellationToken);
@@ -228,7 +249,8 @@ public sealed class InquiryService
             workingDirectory,
             null,
             TimeSpan.FromMinutes(5),
-            cancellationToken);
+            cancellationToken,
+            ActivitySink(ProviderId.Claude));
         if (result.ExitCode != 0)
             throw new InvalidOperationException(DescribeFailure(result));
         return result.StandardOutput;
@@ -254,7 +276,8 @@ public sealed class InquiryService
             workingDirectory,
             payload,
             TimeSpan.FromMinutes(6),
-            cancellationToken);
+            cancellationToken,
+            ActivitySink(ProviderId.Antigravity));
         if (result.ExitCode != 0)
             throw new InvalidOperationException(DescribeFailure(result));
 
