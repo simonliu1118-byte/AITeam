@@ -18,6 +18,8 @@ public sealed class TaskStageStrip : Control
 
     private const int NodeSize = 15;
     private const int NodeTop = 4;
+    private const float MaxLabelSize = 8.5F;
+    private const float MinLabelSize = 6.5F;
 
     private IReadOnlyList<TaskStage> _stages = Array.Empty<TaskStage>();
     private int _currentIndex = -1;
@@ -81,6 +83,14 @@ public sealed class TaskStageStrip : Control
         var slot = (float)ClientSize.Width / _stages.Count;
         var centerY = NodeTop + NodeSize / 2f;
 
+        var labels = new string[_stages.Count];
+        for (var i = 0; i < _stages.Count; i++)
+            labels[i] = TaskStages.DisplayName(_stages[i]);
+
+        // 階段名稱一律完整顯示，不縮寫成「準…」。先把字級調小試著讓每一格都放得下；
+        // 視窗窄到連最小字級都塞不下時，就只留圓點，單獨把目前階段的名稱置中寫在下方。
+        using var labelFont = ChooseLabelFont(labels, slot - 4f, out var showEveryLabel);
+
         for (var i = 0; i < _stages.Count; i++)
         {
             var centerX = slot * i + slot / 2f;
@@ -117,17 +127,59 @@ public sealed class TaskStageStrip : Control
                 e.Graphics.DrawEllipse(pen, RectangleF.Inflate(node, -1, -1));
             }
 
-            var label = TaskStages.DisplayName(_stages[i]);
-            using var font = current ? new Font(Font, FontStyle.Bold) : new Font(Font, FontStyle.Regular);
+            if (!showEveryLabel) continue;
+
+            using var font = new Font(labelFont, current ? FontStyle.Bold : FontStyle.Regular);
             var slotRect = new Rectangle((int)(slot * i), NodeTop + NodeSize + 5, (int)slot, 20);
             TextRenderer.DrawText(
                 e.Graphics,
-                label,
+                labels[i],
                 font,
                 slotRect,
                 current ? CurrentText : PendingText,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.NoPadding);
         }
+
+        if (!showEveryLabel)
+        {
+            var index = _allDone ? _stages.Count - 1 : _currentIndex;
+            if (index < 0) return;
+
+            var fullWidth = new Rectangle(0, NodeTop + NodeSize + 5, ClientSize.Width, 20);
+            TextRenderer.DrawText(
+                e.Graphics,
+                labels[index],
+                labelFont,
+                fullWidth,
+                CurrentText,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.NoPadding);
+        }
+    }
+
+    /// <summary>
+    /// 找出能把「所有」階段名稱完整放進各自格子的最大字級。真的放不下時回傳 false，
+    /// 由呼叫端改成只顯示目前階段的名稱——寧可少顯示，也不要顯示被截斷的半個詞。
+    /// </summary>
+    private Font ChooseLabelFont(IReadOnlyList<string> labels, float available, out bool showEveryLabel)
+    {
+        for (var size = MaxLabelSize; size >= MinLabelSize; size -= 0.5F)
+        {
+            // 目前階段是粗體，量最寬的情況才不會剛好算得下、實際卻超出。
+            var candidate = new Font(Font.FontFamily, size, FontStyle.Bold);
+            var widest = labels.Max(label => TextRenderer.MeasureText(
+                label, candidate, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width);
+
+            if (widest <= available)
+            {
+                showEveryLabel = true;
+                return candidate;
+            }
+
+            candidate.Dispose();
+        }
+
+        showEveryLabel = false;
+        return new Font(Font.FontFamily, MaxLabelSize, FontStyle.Bold);
     }
 
     private static void DrawCheck(Graphics g, RectangleF node)

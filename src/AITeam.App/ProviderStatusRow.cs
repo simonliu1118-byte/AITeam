@@ -102,8 +102,10 @@ public sealed class ProviderStatusRow
             ProviderHealthState.Online => new(Color.FromArgb(46, 160, 92), "上線", "可用"),
             ProviderHealthState.Quota => new(Color.FromArgb(224, 132, 37), "超過限額", "本次工作會自動跳過"),
             ProviderHealthState.AuthenticationRequired => new(Color.FromArgb(48, 116, 181), "需登入", "請重新完成 CLI 登入"),
-            ProviderHealthState.TemporaryError => new(Color.FromArgb(207, 86, 50), "暫時異常", "稍後可重新檢查"),
-            ProviderHealthState.Error => new(Color.FromArgb(194, 58, 52), "錯誤", "本次先跳過"),
+            ProviderHealthState.TemporaryError => new(Color.FromArgb(207, 86, 50), "暫時異常", "稍後可重新檢查，原因見右側紀錄"),
+            // 「錯誤」是分類不出來時的結果，卡片這一格放不下 CLI 原文（放進來會被縮到看不清楚），
+            // 所以這裡只指路，完整原文寫在右側的執行紀錄。
+            ProviderHealthState.Error => new(Color.FromArgb(194, 58, 52), "錯誤", "本次先跳過，原因見右側紀錄"),
             ProviderHealthState.Missing => new(Color.FromArgb(101, 108, 117), "未安裝", "找不到 CLI"),
             _ => new(Color.FromArgb(145, 153, 163), health.State.ToString(), health.Message)
         };

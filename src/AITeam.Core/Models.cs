@@ -106,7 +106,10 @@ public sealed record ProviderHealth(
     ProviderId Provider,
     ProviderHealthState State,
     string Message,
-    TimeSpan Duration)
+    TimeSpan Duration,
+    // CLI 原文（已壓成一行並截斷）。畫面上只顯示分類後的短句，但分類錯的時候
+    // 使用者完全看不到 CLI 到底說了什麼，等於無從查起；原文一定要留著寫進紀錄。
+    string Detail = "")
 {
     public static ProviderHealth Checking(ProviderId id) =>
         new(id, ProviderHealthState.Checking, "檢查中...", TimeSpan.Zero);

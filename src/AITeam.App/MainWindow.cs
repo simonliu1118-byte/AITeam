@@ -638,6 +638,10 @@ public sealed class MainWindow : Form
             var health = await item.Value;
             _providerCards[item.Key].SetHealth(health);
             AppendLog($"{item.Key.ToFriendlyName()}：{health.State.ToFriendlyName()} ({health.Duration.TotalSeconds:0.0}s)");
+            // 只要 CLI 有話說就寫進紀錄。卡片上只有「錯誤」兩個字，看不出到底是額度用完、
+            // 沒登入還是參數不合，等於無從查起；一次檢查成功但中途換過參數時也要留痕跡。
+            if (!string.IsNullOrWhiteSpace(health.Detail))
+                AppendLog($"    └ CLI 回報：{health.Detail}");
         }
         _recheckButton.Enabled = true;
         AppendLog("AI 檢查完成。");
