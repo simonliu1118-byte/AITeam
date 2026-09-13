@@ -13,7 +13,8 @@ public sealed record InquiryResult(
     RequestIntent Intent,
     ProviderId Provider,
     string Answer,
-    ChangeTaskResult? Change = null);
+    ChangeTaskResult? Change = null,
+    string Subject = "");
 
 public sealed class ChangePipelineDispatchException : Exception
 {
@@ -113,7 +114,7 @@ public sealed class InquiryService
                                 cancellationToken);
 
                             var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";
-                            return new InquiryResult(RequestIntent.Change, change.FinalReviewer, summary, change);
+                            return new InquiryResult(RequestIntent.Change, change.FinalReviewer, summary, change, parsed.Subject);
                         }
                         catch (OperationCanceledException)
                         {
@@ -266,6 +267,9 @@ You are the AITeam read-only request gate for project "{project.Name}".
 {ChangeTaskService.DescribeProject(project)}
 Work strictly inside the provided isolated copy of the repository. You may inspect files, search code, and reason about the project, but do not intentionally modify files.
 
+After the intent line below, always output one subject line in this exact form, used as the title of this task in the history list:
+AITeamSubject: <8-20 個字的繁體中文短主旨，描述這次要做／要查的是什麼，不要加句號>
+
 Classify the user's request first:
 - If the user asks only to inspect, explain, diagnose, compare, answer a question, or review existing code without changing it, output exactly this first line:
 AITeamIntent: INQUIRY
@@ -286,11 +290,25 @@ User request:
             : RequestIntent.Inquiry;
 
         var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
-        if (lines.Count > 0 && lines[0].StartsWith("AITeamIntent:", StringComparison.OrdinalIgnoreCase))
+
+        // 開頭的兩行標記（意圖、主旨）只是給程式讀的，不要留在顯示給人看的答案裡。
+        var subject = "";
+        for (var i = 0; i < lines.Count && i < 4; i++)
+        {
+            var line = lines[i].Trim();
+            if (line.StartsWith("AITeamSubject:", StringComparison.OrdinalIgnoreCase))
+            {
+                subject = line["AITeamSubject:".Length..].Trim();
+                lines.RemoveAt(i);
+                break;
+            }
+        }
+        if (lines.Count > 0 && lines[0].Trim().StartsWith("AITeamIntent:", StringComparison.OrdinalIgnoreCase))
             lines.RemoveAt(0);
+
         var answer = string.Join(Environment.NewLine, lines).Trim();
         if (answer.Length == 0) answer = intent == RequestIntent.Change ? "已判斷為修改任務。" : text;
-        return new InquiryResult(intent, provider, answer);
+        return new InquiryResult(intent, provider, answer, null, subject);
     }
 
 
