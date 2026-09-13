@@ -61,7 +61,8 @@ public sealed class ProviderHealthService
                 return result.StandardOutput.Contains("\"type\":\"turn.completed\"", StringComparison.OrdinalIgnoreCase)
                     || result.StandardOutput.Contains("AITEAM_HEALTH_OK", StringComparison.OrdinalIgnoreCase);
             },
-            cancellationToken);
+            cancellationToken,
+            fallbackArguments: new[] { "exec", "--skip-git-repo-check", "--json", "-" });
     }
 
     private async Task<ProviderHealth> ProbeClaudeAsync(CancellationToken cancellationToken)
@@ -90,7 +91,8 @@ public sealed class ProviderHealthService
             result => result.ExitCode == 0
                       && !string.IsNullOrWhiteSpace(result.StandardOutput)
                       && !IsJsonErrorResult(result.StandardOutput),
-            cancellationToken);
+            cancellationToken,
+            fallbackArguments: new[] { "-p", prompt, "--output-format", "json" });
     }
 
     private async Task<ProviderHealth> ProbeAntigravityAsync(CancellationToken cancellationToken)
@@ -129,10 +131,44 @@ public sealed class ProviderHealthService
                     || result.StandardOutput.Contains("\"event\":\"result\"", StringComparison.OrdinalIgnoreCase)
                     || result.StandardOutput.Contains("AITEAM_HEALTH_OK", StringComparison.OrdinalIgnoreCase);
             },
-            cancellationToken);
+            cancellationToken,
+            fallbackArguments: new[]
+            {
+                "--dangerously-skip-permissions",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json"
+            });
     }
 
     private async Task<ProviderHealth> RunAndClassifyAsync(
+        ProviderId provider,
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? standardInput,
+        TimeSpan timeout,
+        Func<ProcessRunResult, bool> successPredicate,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? fallbackArguments = null)
+    {
+        var health = await RunOnceAsync(
+            provider, executable, arguments, standardInput, timeout, successPredicate, cancellationToken);
+
+        // CLI 改版把某個參數拿掉時，健康檢查會直接被 CLI 擋下來（「unknown option」），
+        // 於是不管額度夠不夠、有沒有登入，畫面都只會顯示「錯誤」。這種情況改用最精簡的
+        // 參數再試一次，至少能問出這家 AI 真正的狀態，而不是卡在參數問題上。
+        if (fallbackArguments is { Count: > 0 }
+            && health.State == ProviderHealthState.Error
+            && LooksLikeUnsupportedArgument(health.Detail))
+        {
+            var retried = await RunOnceAsync(
+                provider, executable, fallbackArguments, standardInput, timeout, successPredicate, cancellationToken);
+            return retried with { Detail = Summarize($"{health.Detail}｜改用精簡參數重試：{retried.Detail}") };
+        }
+
+        return health;
+    }
+
+    private async Task<ProviderHealth> RunOnceAsync(
         ProviderId provider,
         string executable,
         IReadOnlyList<string> arguments,
@@ -161,15 +197,15 @@ public sealed class ProviderHealthService
             }
 
             var combined = $"{result.StandardError}\n{result.StandardOutput}";
-            return ClassifyFailure(provider, combined, result.Duration);
+            return ClassifyFailure(provider, combined, result.Duration, result.ExitCode);
         }
         catch (FileNotFoundException ex)
         {
-            return new ProviderHealth(provider, ProviderHealthState.Missing, "CLI 未安裝", TimeSpan.Zero);
+            return new ProviderHealth(provider, ProviderHealthState.Missing, "CLI 未安裝", TimeSpan.Zero, Summarize(ex.Message));
         }
         catch (TimeoutException ex)
         {
-            return new ProviderHealth(provider, ProviderHealthState.TemporaryError, ex.Message, timeout);
+            return new ProviderHealth(provider, ProviderHealthState.TemporaryError, ex.Message, timeout, Summarize(ex.Message));
         }
         catch (OperationCanceledException)
         {
@@ -177,20 +213,24 @@ public sealed class ProviderHealthService
         }
         catch (Exception ex)
         {
-            return new ProviderHealth(provider, ProviderHealthState.Error, ex.Message, TimeSpan.Zero);
+            return new ProviderHealth(provider, ProviderHealthState.Error, ex.Message, TimeSpan.Zero, Summarize(ex.Message));
         }
     }
 
     internal static ProviderHealth ClassifyFailure(
         ProviderId provider,
         string text,
-        TimeSpan duration)
+        TimeSpan duration,
+        int? exitCode = null)
     {
         var lower = Normalize(text);
+        // 不管分類成哪一種狀態，CLI 原文都要一起帶回去；畫面只顯示分類後的短句，
+        // 原文則寫進執行紀錄，分類判斷萬一有漏，使用者至少看得到 CLI 真正說了什麼。
+        var detail = Summarize(text, exitCode);
 
-        if (LooksLikeQuota(text) || ContainsAny(lower, "credit", "try again at", "resets at"))
+        if (LooksLikeQuota(text) || ContainsAny(lower, "credit", "try again at", "resets at", "resets on"))
         {
-            return new ProviderHealth(provider, ProviderHealthState.Quota, "超過限額", duration);
+            return new ProviderHealth(provider, ProviderHealthState.Quota, "超過限額", duration, detail);
         }
 
         if (ContainsAny(lower,
@@ -202,7 +242,7 @@ public sealed class ProviderHealthService
                 "auth required",
                 "credential"))
         {
-            return new ProviderHealth(provider, ProviderHealthState.AuthenticationRequired, "需要重新登入", duration);
+            return new ProviderHealth(provider, ProviderHealthState.AuthenticationRequired, "需要重新登入", duration, detail);
         }
 
         if (ContainsAny(lower,
@@ -216,7 +256,7 @@ public sealed class ProviderHealthService
                 "bad gateway",
                 "gateway timeout"))
         {
-            return new ProviderHealth(provider, ProviderHealthState.TemporaryError, "暫時異常", duration);
+            return new ProviderHealth(provider, ProviderHealthState.TemporaryError, "暫時異常", duration, detail);
         }
 
         var firstLine = text
@@ -228,7 +268,50 @@ public sealed class ProviderHealthService
             provider,
             ProviderHealthState.Error,
             string.IsNullOrWhiteSpace(firstLine) ? "異常" : firstLine,
-            duration);
+            duration,
+            detail);
+    }
+
+    /// <summary>
+    /// CLI 因為不認得某個參數而根本沒開始工作。這種失敗跟額度、登入都無關，
+    /// 訊息長得像一般錯誤，所以要獨立判斷出來、換精簡參數重試。
+    /// </summary>
+    internal static bool LooksLikeUnsupportedArgument(string text) => ContainsAny(
+        Normalize(text),
+        "unknown option",
+        "unknown argument",
+        "unknown flag",
+        "unrecognized option",
+        "unrecognised option",
+        "unexpected argument",
+        "invalid option",
+        "error: unknown",
+        "help for more information",
+        "usage: ");
+
+    /// <summary>
+    /// 把 CLI 原文壓成一行、去掉空白行並截斷，方便直接寫進執行紀錄。
+    /// </summary>
+    internal static string Summarize(string text, int? exitCode = null, int max = 400)
+    {
+        var flattened = string.Join(
+            " ",
+            text
+                .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0));
+
+        if (flattened.Length > max)
+        {
+            flattened = flattened[..max] + "…";
+        }
+
+        if (flattened.Length == 0)
+        {
+            flattened = "（CLI 沒有輸出任何訊息）";
+        }
+
+        return exitCode is null ? flattened : $"exit {exitCode}｜{flattened}";
     }
 
     /// <summary>
@@ -239,6 +322,9 @@ public sealed class ProviderHealthService
     internal static bool LooksLikeQuota(string text) => ContainsAny(
         Normalize(text),
         "usage limit",
+        "session limit",
+        "weekly limit",
+        "usage credit",
         "quota",
         "rate limit",
         "resource exhausted",
@@ -247,6 +333,8 @@ public sealed class ProviderHealthService
         "limit exceeded",
         "exceeded your",
         "reached your limit",
+        "hit your limit",
+        "credits to keep working",
         "upgrade your plan",
         "out of credit",
         "insufficient credit",

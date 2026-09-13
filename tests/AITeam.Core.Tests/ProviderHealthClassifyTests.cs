@@ -23,6 +23,46 @@ public sealed class ProviderHealthClassifyTests
     }
 
     [Theory]
+    // Claude CLI 用完額度時畫面上出現的原句（使用者實機截圖）
+    [InlineData("Session limit reached · Turn on usage credits to keep working · Resets Mon, Sep 14, 12:00 AM")]
+    [InlineData("Weekly limit reached. Resets on Monday.")]
+    [InlineData("You've hit your limit for this session.")]
+    public void SessionLimitWording_IsAlsoTreatedAsQuota(string message)
+    {
+        var health = ProviderHealthService.ClassifyFailure(ProviderId.Claude, message, TimeSpan.Zero);
+        Assert.Equal(ProviderHealthState.Quota, health.State);
+    }
+
+    [Fact]
+    public void FailureDetail_KeepsTheRawCliText_SoTheLogCanShowIt()
+    {
+        var health = ProviderHealthService.ClassifyFailure(
+            ProviderId.Claude, "error: unknown option '--no-session-persistence'\n\nUsage: claude [options]", TimeSpan.Zero, exitCode: 1);
+
+        Assert.Equal(ProviderHealthState.Error, health.State);
+        Assert.Contains("exit 1", health.Detail);
+        Assert.Contains("unknown option", health.Detail);
+        // 壓成一行才好寫進紀錄
+        Assert.DoesNotContain("\n", health.Detail);
+    }
+
+    [Theory]
+    [InlineData("error: unknown option '--no-session-persistence'", true)]
+    [InlineData("Unrecognized option: --print-timeout", true)]
+    [InlineData("Usage: claude [options] [command]", true)]
+    [InlineData("something exploded", false)]
+    public void UnsupportedArgumentFailures_AreDetectedSeparately(string message, bool expected)
+    {
+        Assert.Equal(expected, ProviderHealthService.LooksLikeUnsupportedArgument(message));
+    }
+
+    [Fact]
+    public void SilentCliFailure_StillSaysSomething()
+    {
+        Assert.Equal("exit 137｜（CLI 沒有輸出任何訊息）", ProviderHealthService.Summarize("  \r\n  ", 137));
+    }
+
+    [Theory]
     [InlineData("Not logged in. Please run login first.")]
     [InlineData("{\"error\":{\"type\":\"authentication_error\"}}")]
     public void AuthMessages_AreClassifiedAsAuthenticationRequired(string message)
