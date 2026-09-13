@@ -68,6 +68,9 @@ public sealed class ProjectManagerForm : Form
             RowCount = 2,
             BackColor = AppBackground
         };
+        // 單欄 TableLayoutPanel 必須明確指定 Percent 欄寬，否則該欄預設 AutoSize，
+        // 內容多寬就撐多寬、視窗變窄時不會縮，整塊內容會溢出右緣被裁掉。
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         Controls.Add(shell);
@@ -123,6 +126,7 @@ public sealed class ProjectManagerForm : Form
             RowCount = 3,
             BackColor = Color.White
         };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -148,6 +152,7 @@ public sealed class ProjectManagerForm : Form
         panel.Controls.Add(_projectList, 0, 1);
 
         var foot = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
+        foot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         var divider = new Panel { Height = 1, Dock = DockStyle.Top, BackColor = Color.FromArgb(238, 241, 244), Margin = new Padding(0, 8, 0, 8) };
         foot.Controls.Add(divider, 0, 0);
         foot.Controls.Add(new Label
@@ -174,6 +179,7 @@ public sealed class ProjectManagerForm : Form
             RowCount = 4,
             BackColor = AppBackground
         };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -184,6 +190,7 @@ public sealed class ProjectManagerForm : Form
         root.Controls.Add(BuildLocationSection(), 0, 2);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 12, 0, 0) };
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         bottom.Controls.Add(BuildVersionRuleReferenceSection(), 0, 0);
         bottom.Controls.Add(BuildFooter(), 0, 1);
         root.Controls.Add(bottom, 0, 3);
@@ -372,6 +379,7 @@ public sealed class ProjectManagerForm : Form
             RowCount = 2 + extraRows,
             BackColor = Color.White
         };
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         for (var i = 0; i < body.RowCount; i++)
             body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         card.Controls.Add(body);
