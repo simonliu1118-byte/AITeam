@@ -6,16 +6,17 @@
 
 - 本 repository 為 **Public、source-visible proprietary**。
 - Public visibility 不代表 open source；使用、修改、散布與商業權利以根 `LICENSE` 為準。
-- 本 repository 同時是 AITeam / CYapps / CYapps_pvt 三者的**共通規則母本 repository**。
+- 本 repository 是目前治理體系的**共通規則母本 repository**；目前納管 repo 包含 `AITeam`、`CYapps`、`CYapps_pvt` 與個人用途的 `sandbox`。
 
 ## 2. 共通規則母本責任
 
-- `main:/REPOSITORY_RULES.md`、`main:/COMMON_RULES_VERSION`、`main:/COMMON_RULES_CHANGELOG.md` 是三 repo 共通規則唯一母本。
-- 共通規則變更只能由 AITeam 的 `governance/*` branch 提出；AITeam `main` 更新後，同一輪治理工作必須直接把這三個共通檔同步到 `CYapps` 與 `CYapps_pvt`，三個 repo 一致後才視為共通規則變更完成。
+- `main:/REPOSITORY_RULES.md`、`main:/COMMON_RULES_VERSION`、`main:/COMMON_RULES_CHANGELOG.md` 是納管 repositories 的共通規則唯一母本。
+- 共通規則變更只能由 AITeam 的 `governance/*` branch 提出；AITeam `main` 更新後，同一輪治理工作必須直接把這三個共通檔同步到所有下游納管 repo，全部一致後才視為共通規則變更完成。
 - 直接同步可使用正常 Git／GitHub API／治理 PR，不得依賴 GitHub Actions schedule 才能完成；Actions 額度不足、停用或暫時不可用時，仍必須完成同步。
 - AITeam 不得藉由同步機制修改下游 repo 的 `REPO_POLICY.md` 或 `PROJECT_RULES.md`；同步範圍只限共通母本檔。
 - 下游 sync workflow 與 Governance Check 是第二道自動化保險，不是唯一一致性來源。
-- 任何 AI 接手 `CYapps` 或 `CYapps_pvt` 工作前，應直接比對其 `COMMON_RULES_VERSION` 與 AITeam `main`；若版本不同或內容有疑義，先同步共通規則，再開始 APP 工作。
+- 任何 AI 接手下游納管 repo 工作前，應直接比對其 `COMMON_RULES_VERSION` 與 AITeam `main`；若版本不同或內容有疑義，先同步共通規則，再開始 APP 工作。
+- `sandbox` 是個人用途 repository；AITeam 同步到 sandbox 的共通母本必須保持中性，不得把 CY 公司名稱、公司命名規則、公司 copyright 或公司資料政策寫進共通母本。
 
 ## 3. Public 安全
 
