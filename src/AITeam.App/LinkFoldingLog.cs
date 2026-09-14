@@ -108,8 +108,21 @@ public sealed class LinkFoldingLog
     {
         if (offset < 0 || offset >= _box.TextLength) return;
 
-        _box.Select(offset, _box.TextLength - offset);
-        _box.SelectedText = string.Empty;
+        // 唯讀的 RichTextBox 會直接忽略 SelectedText 的指派，刪不掉任何東西——
+        // 這正是「正在發言…」沒被換掉、跟真正的發言疊在一起的原因。
+        // 暫時解除唯讀，刪完再設回去。
+        var wasReadOnly = _box.ReadOnly;
+        _box.ReadOnly = false;
+        try
+        {
+            _box.Select(offset, _box.TextLength - offset);
+            _box.SelectedText = string.Empty;
+        }
+        finally
+        {
+            _box.ReadOnly = wasReadOnly;
+        }
+
         _links.RemoveAll(link => link.Start >= offset);
         ResetCaretStyle();
     }

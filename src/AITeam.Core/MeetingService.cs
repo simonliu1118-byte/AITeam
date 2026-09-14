@@ -272,6 +272,26 @@ AITeamScale: SHORT | STANDARD | DEEP
 """;
     }
 
+    /// <summary>
+    /// 會議的結果摘要。以前直接把最後一位發言者的內容當摘要，但最後一個講的人
+    /// 不見得代表這場會議的結論——而且如果他只是補一句話，摘要就變得莫名其妙。
+    /// 改成寫成「每個人最後的立場」：這才是看歷史紀錄時真正想知道的事。
+    /// </summary>
+    public static string Summarise(IReadOnlyList<MeetingRemark> transcript, int rounds, int calls)
+    {
+        var spoken = transcript.Where(r => r.Speaker is not null && !r.Failed).ToList();
+        if (spoken.Count == 0) return "（沒有任何 AI 發言。）";
+
+        var positions = spoken
+            .GroupBy(r => r.Speaker!.Value)
+            .Select(group => group.Last())
+            .OrderBy(r => r.Round)
+            .Select(r => $"● {r.SpeakerName}：{TextSummary.OneLine(r.Text, 220)}");
+
+        return $"共 {rounds} 輪 · 呼叫 {calls} 次{Environment.NewLine}{Environment.NewLine}"
+               + string.Join(Environment.NewLine, positions);
+    }
+
     internal static (string Text, MeetingScale? SuggestedScale) ParseRemark(string answer)
     {
         var text = (answer ?? "").Trim();

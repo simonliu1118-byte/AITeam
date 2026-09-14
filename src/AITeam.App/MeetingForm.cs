@@ -361,7 +361,7 @@ public sealed class MeetingForm : Form
 
         ConfigureSecondaryButton(_endButton, "結束會議", 100);
         _endButton.Margin = new Padding(0, 0, 8, 0);
-        _endButton.Click += async (_, _) => await EndMeetingAsync(TaskOutcome.Cancelled);
+        _endButton.Click += async (_, _) => await EndMeetingAsync(TaskOutcome.Completed);
         buttons.Controls.Add(_endButton, 3, 0);
 
         ConfigureSecondaryButton(_decideButton, "直接定案", 100);
@@ -617,11 +617,17 @@ public sealed class MeetingForm : Form
     {
         if (_transcriptEntries.Count == 0) return;
 
+        // 開完會就是開完了。只有「一個 AI 都沒講到話就關掉」才算沒完成。
+        if (outcome == TaskOutcome.Completed
+            && !_transcriptEntries.Any(r => r.Speaker is not null && !r.Failed))
+        {
+            outcome = TaskOutcome.Cancelled;
+        }
+
         var transcript = string.Join(
             Environment.NewLine + Environment.NewLine,
             _transcriptEntries.Select(r => $"【第 {r.Round} 輪 · {r.SpeakerName}】{Environment.NewLine}{r.Text}"));
 
-        var lastAi = _transcriptEntries.LastOrDefault(r => r.Speaker is not null && !r.Failed);
         _history.Save(
             new TaskHistoryEntry
             {
@@ -633,7 +639,7 @@ public sealed class MeetingForm : Form
                 Outcome = outcome,
                 StartedAt = _startedAt,
                 FinishedAt = DateTime.Now,
-                Result = lastAi is null ? "（沒有任何 AI 發言。）" : TextSummary.OneLine(lastAi.Text, 600)
+                Result = MeetingService.Summarise(_transcriptEntries, _round, _calls)
             },
             transcript);
     }
