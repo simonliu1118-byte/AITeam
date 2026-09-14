@@ -533,7 +533,12 @@ public sealed class MainWindow : Form
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        currentTitleRow.Controls.Add(SectionTitle("目前任務", new Padding(2, 4, 0, 7)), 0, 0);
+        // 標題和徽章高度不一樣（文字約 19px、徽章 30px），兩個都用 Anchor = Left 讓
+        // TableLayoutPanel 各自垂直置中、上下邊界也一致，中心線才會落在同一條水平線上。
+        // 標題若沿用上邊界 4px，它會被往下推、徽章卻是置中的，看起來就沒對齊。
+        var currentTitle = SectionTitle("目前任務", new Padding(2, 0, 0, 7));
+        currentTitle.Anchor = AnchorStyles.Left;
+        currentTitleRow.Controls.Add(currentTitle, 0, 0);
 
         // 待命／執行中講的是「目前任務」的狀態，就放在它旁邊；右上角讓給把關強度。
         _modeBadge.BackColor = AppBackground;
@@ -547,6 +552,7 @@ public sealed class MainWindow : Form
         _historyButton.FlatStyle = FlatStyle.Flat;
         _historyButton.BackColor = Color.White;
         _historyButton.ForeColor = PrimaryText;
+        _historyButton.Anchor = AnchorStyles.Right;
         _historyButton.Margin = new Padding(0, 0, 2, 7);
         _historyButton.FlatAppearance.BorderColor = BorderColor;
         _historyButton.Click += (_, _) => OpenTaskHistory();

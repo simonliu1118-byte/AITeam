@@ -319,7 +319,7 @@ public sealed class MeetingForm : Form
         _transcriptBox.BorderStyle = BorderStyle.None;
         _transcriptBox.BackColor = CardBackground;
         _transcriptBox.ForeColor = Color.FromArgb(55, 62, 70);
-        _transcriptBox.Font = new Font("Microsoft JhengHei UI", 9.5F);
+        _transcriptBox.Font = new Font("Microsoft JhengHei UI", 9F);
         card.Controls.Add(_transcriptBox);
         return card;
     }
@@ -581,7 +581,7 @@ public sealed class MeetingForm : Form
     {
         _pendingMark = _transcript.Mark();
         _transcript.AppendHeading($"第 {_round} 輪 · {speaker.ToFriendlyName()}{Environment.NewLine}");
-        _transcript.Append($"正在發言…{Environment.NewLine}{Environment.NewLine}");
+        _transcript.Append($"正在發言…{Environment.NewLine}");
         _transcript.ScrollToEnd();
         SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中 00:00");
     }
@@ -652,12 +652,13 @@ public sealed class MeetingForm : Form
             ? $" · 用時 {(int)remark.Elapsed.TotalMinutes:00}:{remark.Elapsed.Seconds:00}"
             : "";
         _transcript.AppendHeading($"第 {remark.Round} 輪 · {remark.SpeakerName}{spent}{Environment.NewLine}");
-        _transcript.Append(remark.Text + Environment.NewLine);
+        _transcript.Append(TextSummary.CompactParagraphs(remark.Text) + Environment.NewLine);
         // 每則發言後面畫一條線，使用者才知道這個人講完了、下面是另一個人。
+        // 有了這條線就不需要再多墊空行——一輪三個人，多墊的空行會讓人一直上下捲。
         _transcript.AppendDivider();
-        _transcript.Append(Environment.NewLine);
         _transcript.ScrollToEnd();
     }
+
 
     private void AppendSystemLine(string text)
     {
@@ -666,7 +667,7 @@ public sealed class MeetingForm : Form
             BeginInvoke(new Action<string>(AppendSystemLine), text);
             return;
         }
-        _transcript.Append($"· {text}{Environment.NewLine}{Environment.NewLine}");
+        _transcript.Append($"· {text}{Environment.NewLine}");
         _transcript.ScrollToEnd();
     }
 
