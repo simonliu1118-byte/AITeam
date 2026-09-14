@@ -386,6 +386,7 @@ public sealed class ChangeTaskService
             var prUrl = $"https://github.com/{project.GitHubRepo}/pull/{prNumber}";
             progress($"已開啟 PR #{prNumber}：{prUrl}");
 
+            var lastCiSummary = "（本次沒有取得 CI 檢查摘要。）";
             var skipCiGate = false;
             if (!hasCi)
             {
@@ -394,6 +395,7 @@ public sealed class ChangeTaskService
                 if (!hasAnyChecks)
                 {
                     skipCiGate = true;
+                    lastCiSummary = "（這個 PR 上沒有出現任何 CI 檢查。）";
                     progress("⚠️ 等待後 PR 上仍未出現任何檢查（可能是這個 repo 的權限限制）。這是首次補建 CI，本次僅依 Final Review 把關、跳過 CI 閘門；下一次任務開始，CI 應該已經正常運作。");
                 }
             }
@@ -405,6 +407,7 @@ public sealed class ChangeTaskService
                     Stage(TaskStage.Verify, $"等待 GitHub CI 檢查結果（PR #{prNumber}）", round: ciRound + 1);
                     progress($"等待 {project.GitHubRepo} 的 CI 檢查結果…");
                     var (ciPassed, ciSummary) = await WaitForPrChecksAsync(project, prNumber, cancellationToken);
+                    lastCiSummary = ciSummary;
                     if (ciPassed)
                     {
                         progress("CI 檢查通過。");
@@ -445,17 +448,46 @@ public sealed class ChangeTaskService
             {
                 onStage(new TaskProgress(
                     TaskKind.Change, TaskStage.Merge, TaskActivity.WaitingForUser,
-                    $"高風險變更，需要你到 GitHub 人工確認合併（PR #{prNumber}）"));
-                progress($"⚠️ 高風險變更，需要人工確認合併：{prUrl}");
-                await WaitForManualMergeAsync(project, prNumber, cancellationToken);
-                progress("偵測到 PR 已由人工合併。");
+                    $"高風險變更，等你確認要不要合併（PR #{prNumber}）"));
+                progress($"⚠️ 高風險變更，需要你確認才會合併：{prUrl}");
+
+                var changedFiles = await GetDiffStatAsync(worktreeRoot, baseSha, cancellationToken);
+                var decision = await _interaction.AskMergeApproval(
+                    new MergeApprovalPrompt(
+                        project.Name,
+                        prNumber,
+                        prUrl,
+                        newVersion,
+                        risk.ToString(),
+                        mode.ToFriendlyName(),
+                        changedFiles,
+                        lastCiSummary,
+                        OneLine(finalReview, 1200)),
+                    cancellationToken);
+
+                if (decision == MergeDecision.Skip)
+                {
+                    // 分支與 PR 都已經在 GitHub 上了，本機工作區可以收掉。
+                    formalized = true;
+                    progress($"你選擇暫不合併。PR 與分支都保留著，隨時可以自己處理：{prUrl}");
+                    return new ChangeTaskResult(
+                        implementer,
+                        lastFinalReviewer,
+                        risk,
+                        newVersion,
+                        $"修改已完成並開啟 PR，但依你的決定暫不合併：{project.Name} {newVersion}\r\nPR：{prUrl}",
+                        degradedReview,
+                        mode);
+                }
+
+                Stage(TaskStage.Merge, "合併 PR");
+                await MergeIfNotAlreadyMergedAsync(project, prNumber, progress, cancellationToken);
             }
             else
             {
                 Stage(TaskStage.Merge, "合併 PR");
                 progress("風險等級允許自動合併，執行合併…");
-                await MergePullRequestAsync(project, prNumber, cancellationToken);
-                progress("PR 已自動合併。");
+                await MergeIfNotAlreadyMergedAsync(project, prNumber, progress, cancellationToken);
             }
 
             formalized = true;
@@ -738,27 +770,49 @@ public sealed class ChangeTaskService
             throw new InvalidOperationException("合併 PR 失敗：" + FirstUsefulLine(result.StandardError, result.StandardOutput));
     }
 
-    private async Task WaitForManualMergeAsync(ProjectEntry project, int prNumber, CancellationToken cancellationToken)
+    /// <summary>
+    /// 使用者在等待確認期間也可能直接跑去 GitHub 上合併，或把 PR 關掉。
+    /// 所以按下合併之前先看一下現在的狀態，不要對著已經處理完的 PR 再合一次。
+    /// </summary>
+    private async Task MergeIfNotAlreadyMergedAsync(
+        ProjectEntry project,
+        int prNumber,
+        Action<string> progress,
+        CancellationToken cancellationToken)
     {
-        while (true)
+        var state = await GetPrStateAsync(project, prNumber, cancellationToken);
+        if (string.Equals(state, "MERGED", StringComparison.OrdinalIgnoreCase))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var view = await _runner.RunAsync(
-                "gh",
-                new[] { "pr", "view", prNumber.ToString(), "--repo", project.GitHubRepo, "--json", "state" },
-                project.RepoPath,
-                null,
-                TimeSpan.FromSeconds(30),
-                cancellationToken);
-            if (view.ExitCode == 0)
-            {
-                var state = ParsePrState(view.StandardOutput);
-                if (string.Equals(state, "MERGED", StringComparison.OrdinalIgnoreCase)) return;
-                if (string.Equals(state, "CLOSED", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"PR #{prNumber} 已被關閉但未合併，任務中止。");
-            }
-            await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
+            progress($"PR #{prNumber} 已經是合併狀態（可能你剛才直接在 GitHub 上合併了），不重複執行。");
+            return;
         }
+
+        if (string.Equals(state, "CLOSED", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"PR #{prNumber} 已被關閉但未合併，任務中止。");
+
+        await MergePullRequestAsync(project, prNumber, cancellationToken);
+        progress($"PR #{prNumber} 已合併。");
+    }
+
+    private async Task<string?> GetPrStateAsync(ProjectEntry project, int prNumber, CancellationToken cancellationToken)
+    {
+        var view = await _runner.RunAsync(
+            "gh",
+            new[] { "pr", "view", prNumber.ToString(), "--repo", project.GitHubRepo, "--json", "state" },
+            project.RepoPath,
+            null,
+            TimeSpan.FromSeconds(30),
+            cancellationToken);
+        return view.ExitCode == 0 ? ParsePrState(view.StandardOutput) : null;
+    }
+
+    /// <summary>改了哪些檔案、各改幾行。要使用者判斷合不合併，至少要讓他看到這個。</summary>
+    private async Task<string> GetDiffStatAsync(string worktreeRoot, string baseSha, CancellationToken cancellationToken)
+    {
+        var result = await RunGitAsync(worktreeRoot, new[] { "diff", "--stat", baseSha, "HEAD" }, cancellationToken);
+        return string.IsNullOrWhiteSpace(result.StandardOutput)
+            ? "（沒有取得變更摘要。）"
+            : result.StandardOutput.Trim();
     }
 
     private async Task<(string Version, string Tag)> BumpVersionAsync(

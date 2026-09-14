@@ -80,16 +80,43 @@ public enum CheckpointAction
 public sealed record CheckpointResponse(CheckpointAction Action, string? Note = null);
 
 /// <summary>
+/// 高風險變更要不要合併，攤開給使用者判斷用的全部資料。
+/// 這一關以前要使用者自己開瀏覽器去 GitHub 按，現在搬進 AITeam，
+/// 所以判斷需要的東西必須一起搬進來——不然就變成盲按。
+/// </summary>
+public sealed record MergeApprovalPrompt(
+    string ProjectName,
+    int PullNumber,
+    string PullUrl,
+    string Version,
+    string Risk,
+    string ReviewMode,
+    string ChangedFiles,
+    string CiSummary,
+    string ReviewSummary);
+
+public enum MergeDecision
+{
+    /// <summary>合併。</summary>
+    Merge,
+
+    /// <summary>暫不合併：PR 與分支都保留，之後可以自己到 GitHub 處理。</summary>
+    Skip
+}
+
+/// <summary>
 /// 一次任務裡「使用者怎麼參與」的設定，集中成一個物件傳，
 /// 免得每加一個互動方式就要在好幾層方法上多掛一個參數。
 /// </summary>
 public sealed record TaskInteraction(
     TaskNoteBoard Notes,
     bool PauseAfterImplement,
-    Func<CheckpointPrompt, CancellationToken, Task<CheckpointResponse>> AskCheckpoint)
+    Func<CheckpointPrompt, CancellationToken, Task<CheckpointResponse>> AskCheckpoint,
+    Func<MergeApprovalPrompt, CancellationToken, Task<MergeDecision>> AskMergeApproval)
 {
     public static TaskInteraction None { get; } = new(
         new TaskNoteBoard(),
         false,
-        (_, _) => Task.FromResult(new CheckpointResponse(CheckpointAction.Continue)));
+        (_, _) => Task.FromResult(new CheckpointResponse(CheckpointAction.Continue)),
+        (_, _) => Task.FromResult(MergeDecision.Skip));
 }
