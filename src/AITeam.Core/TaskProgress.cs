@@ -5,7 +5,21 @@ namespace AITeam.Services;
 public enum TaskKind
 {
     Inquiry,
-    Change
+    Change,
+
+    /// <summary>AI 四方會議。不走階段條，但會跟其他任務一起留在歷史紀錄裡。</summary>
+    Meeting
+}
+
+public static class TaskKindExtensions
+{
+    public static string ToFriendlyName(this TaskKind kind) => kind switch
+    {
+        TaskKind.Inquiry => "查詢",
+        TaskKind.Change => "修改",
+        TaskKind.Meeting => "會議",
+        _ => kind.ToString()
+    };
 }
 
 public enum TaskStage
@@ -59,8 +73,12 @@ public static class TaskStages
         TaskStage.Merge
     };
 
-    public static IReadOnlyList<TaskStage> For(TaskKind kind) =>
-        kind == TaskKind.Inquiry ? InquiryStages : ChangeStages;
+    public static IReadOnlyList<TaskStage> For(TaskKind kind) => kind switch
+    {
+        TaskKind.Change => ChangeStages,
+        // 會議沒有階段可言（輪流發言而已），借用查詢的兩格，讓畫面不會空掉。
+        _ => InquiryStages
+    };
 
     public static string DisplayName(TaskStage stage) => stage switch
     {

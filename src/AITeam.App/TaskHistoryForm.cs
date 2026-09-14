@@ -30,6 +30,7 @@ public sealed class TaskHistoryForm : Form
     private readonly RichTextBox _logBox = new();
     private readonly LinkFoldingLog _logView;
     private readonly Button _deleteButton = new();
+    private readonly ComboBox _kindFilter = new();
 
     private IReadOnlyList<TaskHistoryEntry> _entries = Array.Empty<TaskHistoryEntry>();
 
@@ -113,6 +114,28 @@ public sealed class TaskHistoryForm : Form
             Margin = new Padding(0, 0, 14, 0)
         };
 
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = CardBackground
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        // 任務與會議放同一個清單，用篩選切換而不是分頁籤：多數時候你想找的是「那件事」，
+        // 不是「那是哪一類」；而且會議常常是任務的前身，放在一起才看得到前後關係。
+        _kindFilter.DropDownStyle = ComboBoxStyle.DropDownList;
+        _kindFilter.Dock = DockStyle.Top;
+        _kindFilter.Font = new Font("Microsoft JhengHei UI", 9.5F);
+        _kindFilter.Margin = new Padding(0, 0, 0, 8);
+        _kindFilter.Items.AddRange(new object[] { "全部", "查詢", "修改", "會議" });
+        _kindFilter.SelectedIndex = 0;
+        _kindFilter.SelectedIndexChanged += (_, _) => LoadHistory();
+        panel.Controls.Add(_kindFilter, 0, 0);
+
         _list.Dock = DockStyle.Fill;
         _list.BorderStyle = BorderStyle.None;
         _list.IntegralHeight = false;
@@ -120,7 +143,9 @@ public sealed class TaskHistoryForm : Form
         _list.ItemHeight = 54;
         _list.DrawItem += DrawHistoryItem;
         _list.SelectedIndexChanged += (_, _) => ShowSelected();
-        card.Controls.Add(_list);
+        panel.Controls.Add(_list, 0, 1);
+
+        card.Controls.Add(panel);
         return card;
     }
 
@@ -230,15 +255,18 @@ public sealed class TaskHistoryForm : Form
 
     private void LoadHistory(int preferredIndex = 0)
     {
-        _entries = _history.Load();
+        _entries = _history.Load().Where(MatchesFilter).ToList();
         _list.Items.Clear();
         foreach (var entry in _entries) _list.Items.Add(entry);
 
         if (_entries.Count == 0)
         {
             _deleteButton.Enabled = false;
-            _detailTitle.Text = "還沒有任何歷史任務";
-            _detailMeta.Text = "送出第一個任務之後，這裡就會留下紀錄。";
+            var filtered = _kindFilter.SelectedIndex > 0;
+            _detailTitle.Text = filtered ? "這個分類還沒有紀錄" : "還沒有任何歷史任務";
+            _detailMeta.Text = filtered
+                ? "換成「全部」可以看到其他紀錄。"
+                : "送出第一個任務之後，這裡就會留下紀錄。";
             _resultBox.Text = "";
             _logView.Clear();
             return;
@@ -250,6 +278,14 @@ public sealed class TaskHistoryForm : Form
         _list.ClearSelected();
         _list.SelectedIndex = Math.Clamp(preferredIndex, 0, _entries.Count - 1);
     }
+
+    private bool MatchesFilter(TaskHistoryEntry entry) => _kindFilter.SelectedIndex switch
+    {
+        1 => entry.Kind == TaskKind.Inquiry,
+        2 => entry.Kind == TaskKind.Change,
+        3 => entry.Kind == TaskKind.Meeting,
+        _ => true
+    };
 
     private void DeleteSelected()
     {
@@ -276,7 +312,7 @@ public sealed class TaskHistoryForm : Form
 
         _detailTitle.Text = entry.Subject;
         _detailMeta.Text =
-            $"{entry.ProjectName} · {DescribeOutcome(entry.Outcome)} · " +
+            $"{entry.Kind.ToFriendlyName()} · {entry.ProjectName} · {DescribeOutcome(entry.Outcome)} · " +
             $"{entry.StartedAt:yyyy-MM-dd HH:mm} · 耗時 {FormatDuration(entry.Duration)}";
         _resultBox.Text = string.IsNullOrWhiteSpace(entry.Result) ? "（沒有結果摘要。）" : entry.Result;
 
@@ -319,7 +355,7 @@ public sealed class TaskHistoryForm : Form
 
         TextRenderer.DrawText(
             e.Graphics,
-            $"{entry.StartedAt:MM-dd HH:mm} · {DescribeOutcome(entry.Outcome)} · {FormatDuration(entry.Duration)}",
+            $"{entry.Kind.ToFriendlyName()} · {entry.StartedAt:MM-dd HH:mm} · {DescribeOutcome(entry.Outcome)} · {FormatDuration(entry.Duration)}",
             MetaFont,
             new Rectangle(textLeft, card.Y + 28, textWidth, 18),
             SecondaryText,

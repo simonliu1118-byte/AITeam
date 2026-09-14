@@ -782,7 +782,8 @@ public sealed class MainWindow : Form
         _taskCts?.Dispose();
         _taskCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         _notes = new TaskNoteBoard();
-        var interaction = new TaskInteraction(_notes, _pauseAfterImplement.Checked, AskCheckpointAsync);
+        var interaction = new TaskInteraction(
+            _notes, _pauseAfterImplement.Checked, AskCheckpointAsync, AskMergeApprovalAsync);
 
         try
         {
@@ -1121,6 +1122,23 @@ public sealed class MainWindow : Form
     {
         using var dialog = new CheckpointDialog(prompt);
         return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Response : null;
+    }
+
+    /// <summary>高風險變更的人工合併關卡，現在在 AITeam 裡完成，不必再開瀏覽器。</summary>
+    private Task<MergeDecision> AskMergeApprovalAsync(MergeApprovalPrompt prompt, CancellationToken cancellationToken)
+    {
+        var decision = InvokeRequired
+            ? (MergeDecision?)Invoke(new Func<MergeDecision?>(() => ShowMergeApprovalDialog(prompt)))
+            : ShowMergeApprovalDialog(prompt);
+
+        // 視窗被直接關掉等於沒有做決定，當成「暫不合併」——不合併是可以反悔的，合併不行。
+        return Task.FromResult(decision ?? MergeDecision.Skip);
+    }
+
+    private MergeDecision? ShowMergeApprovalDialog(MergeApprovalPrompt prompt)
+    {
+        using var dialog = new MergeApprovalDialog(prompt);
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Decision : null;
     }
 
     /// <summary>
