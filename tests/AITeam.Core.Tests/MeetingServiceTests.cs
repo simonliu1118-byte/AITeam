@@ -70,6 +70,24 @@ public sealed class MeetingServiceTests
     }
 
     [Fact]
+    public void FailedOrSkippedTurns_AreKeptOutOfTheTranscript()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Claude,
+            new MeetingSetup("議題", null, MeetingMode.RoundRobin, MeetingScale.Standard),
+            new[]
+            {
+                new MeetingRemark(1, ProviderId.Codex, "（這一輪失敗，沒有發言。）", Failed: true),
+                new MeetingRemark(1, ProviderId.Antigravity, "我認為先做 A")
+            },
+            2,
+            MeetingScale.Standard);
+
+        Assert.DoesNotContain("這一輪失敗", prompt);
+        Assert.Contains("我認為先做 A", prompt);
+    }
+
+    [Fact]
     public void WithoutAProject_ThePromptSaysSoInsteadOfPretending()
     {
         var prompt = MeetingService.BuildPrompt(
