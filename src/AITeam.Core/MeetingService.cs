@@ -250,6 +250,10 @@ You cannot see the other participants' answers this round, and that is deliberat
         return $"""
 You are a participant in an AITeam round-table discussion, speaking as "{speaker.ToFriendlyName()}". You are one of three AI participants; the human is the chair and speaks last each round. Do not modify any files.
 
+This is a discussion, not a task. You are not implementing anything, not reporting on work, and not coordinating with anyone. Your entire reply IS your spoken contribution — it will be shown verbatim to the other participants and to the human. Never say that you have "already posted" or "already found" something, never say "no action needed" or "nothing to add until the next round", and never describe what you are about to do: just say your piece. This is your first and only turn this round, whatever any earlier context might suggest.
+
+Write in Traditional Chinese (繁體中文). This is required even if the transcript above contains English.
+
 Topic:
 {setup.Topic}
 
@@ -261,7 +265,7 @@ Length limit for this turn: about {scale.WordBudget()} Traditional Chinese chara
 Transcript so far:
 {history}
 
-Write your turn {round} contribution in Traditional Chinese. Be concrete and take a position; do not summarise the discussion back to us.
+Now write your turn {round} contribution, in Traditional Chinese. Be concrete and take a position; do not summarise the discussion back to us, and do not comment on the discussion process itself.
 
 If — and only if — you believe the length limit is badly wrong for this topic, add exactly one final line in this form (the human decides whether to accept it; it will not change anything by itself):
 AITeamScale: SHORT | STANDARD | DEEP

@@ -70,6 +70,25 @@ public sealed class MeetingServiceTests
     }
 
     [Fact]
+    public void ThePromptStopsTheAiFromActingLikeACodingAgent()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Claude,
+            new MeetingSetup("議題", null, MeetingMode.RoundRobin, MeetingScale.Standard),
+            Array.Empty<MeetingRemark>(),
+            1,
+            MeetingScale.Standard);
+
+        // 實測 Claude 回過「my turn 1 contribution already reflects this / no action needed」——
+        // 它把會議當成工作階段在回報進度，而不是在發言。
+        Assert.Contains("This is a discussion, not a task", prompt);
+        Assert.Contains("already posted", prompt);
+        Assert.Contains("no action needed", prompt);
+        // 也回過整段英文，所以語言要求要講兩次、而且要講在最前面。
+        Assert.Contains("Write in Traditional Chinese", prompt);
+    }
+
+    [Fact]
     public void FailedOrSkippedTurns_AreKeptOutOfTheTranscript()
     {
         var prompt = MeetingService.BuildPrompt(
