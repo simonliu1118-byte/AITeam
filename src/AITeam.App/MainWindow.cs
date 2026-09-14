@@ -276,7 +276,8 @@ public sealed class MainWindow : Form
         hintArea.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         hintArea.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        _bottomHint.Text = "送出後仍可在上面輸入補充，按「補充說明」加進目前任務。";
+        // 這一欄的寬度被兩顆按鈕吃掉不少，句子太長就會被截成「按「補充...」。
+        _bottomHint.Text = "執行中可繼續輸入補充";
         _bottomHint.AutoSize = false;
         _bottomHint.AutoEllipsis = true;
         _bottomHint.Dock = DockStyle.Top;
@@ -1121,9 +1122,7 @@ public sealed class MainWindow : Form
         _stopButton.Cursor = running ? Cursors.Hand : Cursors.Default;
         _pauseAfterImplement.Visible = !running;
         _applyNoteNow.Visible = running;
-        _bottomHint.Text = running
-            ? "在上面輸入補充，按「補充說明」加進目前任務。"
-            : "送出後仍可在上面輸入補充，按「補充說明」加進目前任務。";
+        _bottomHint.Text = running ? "輸入補充後按「補充說明」" : "執行中可繼續輸入補充";
         if (!running)
         {
             _notes = null;

@@ -157,6 +157,37 @@ public sealed class MeetingServiceTests
         Assert.Null(suggested);
     }
 
+    [Fact]
+    public void TheSummaryIsEveryonesFinalPosition_NotJustWhoeverSpokeLast()
+    {
+        var transcript = new[]
+        {
+            new MeetingRemark(1, ProviderId.Codex, "我主張改用 PostgreSQL"),
+            new MeetingRemark(1, ProviderId.Claude, "我主張維持 SQLite"),
+            new MeetingRemark(2, ProviderId.Codex, "看完大家的說法，我改口支持維持 SQLite"),
+            new MeetingRemark(2, null, "那就先不換"),
+            new MeetingRemark(2, ProviderId.Antigravity, "（這一輪失敗，沒有發言。）", Failed: true)
+        };
+
+        var summary = MeetingService.Summarise(transcript, rounds: 2, calls: 5);
+
+        Assert.Contains("共 2 輪 · 呼叫 5 次", summary);
+        // 每個 AI 取它最後一次的立場，不是只取最後一個講話的人。
+        Assert.Contains("我改口支持維持 SQLite", summary);
+        Assert.Contains("我主張維持 SQLite", summary);
+        // 第一輪那個已經被自己後來的發言取代了。
+        Assert.DoesNotContain("我主張改用 PostgreSQL", summary);
+        // 使用者的發言與失敗的那一則都不算「立場」。
+        Assert.DoesNotContain("那就先不換", summary);
+        Assert.DoesNotContain("這一輪失敗", summary);
+    }
+
+    [Fact]
+    public void AMeetingWhereNobodySpoke_SaysSo()
+    {
+        Assert.Equal("（沒有任何 AI 發言。）", MeetingService.Summarise(Array.Empty<MeetingRemark>(), 0, 0));
+    }
+
     [Theory]
     [InlineData(MeetingScale.Short, 5)]
     [InlineData(MeetingScale.Standard, 10)]
