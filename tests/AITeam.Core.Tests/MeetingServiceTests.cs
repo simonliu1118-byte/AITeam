@@ -70,6 +70,25 @@ public sealed class MeetingServiceTests
     }
 
     [Fact]
+    public void ThePromptStopsTheAiFromActingLikeACodingAgent()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Claude,
+            new MeetingSetup("議題", null, MeetingMode.RoundRobin, MeetingScale.Standard),
+            Array.Empty<MeetingRemark>(),
+            1,
+            MeetingScale.Standard);
+
+        // 實測 Claude 回過「my turn 1 contribution already reflects this / no action needed」——
+        // 它把會議當成工作階段在回報進度，而不是在發言。
+        Assert.Contains("This is a discussion, not a task", prompt);
+        Assert.Contains("already posted", prompt);
+        Assert.Contains("no action needed", prompt);
+        // 也回過整段英文，所以語言要求要講兩次、而且要講在最前面。
+        Assert.Contains("Write in Traditional Chinese", prompt);
+    }
+
+    [Fact]
     public void FailedOrSkippedTurns_AreKeptOutOfTheTranscript()
     {
         var prompt = MeetingService.BuildPrompt(
@@ -136,6 +155,42 @@ public sealed class MeetingServiceTests
 
         Assert.Equal("就照原本的方向做。", text);
         Assert.Null(suggested);
+    }
+
+    [Theory]
+    [InlineData(MeetingScale.Short, 5)]
+    [InlineData(MeetingScale.Standard, 10)]
+    [InlineData(MeetingScale.Deep, 15)]
+    public void HardTimeoutFollowsTheScale_SoAShortRoundCannotRunForHalfAnHour(MeetingScale scale, int minutes)
+    {
+        Assert.Equal(TimeSpan.FromMinutes(minutes), scale.HardTimeout());
+    }
+
+    [Fact]
+    public void ShortRounds_TellTheAiNotToSurveyTheWholeRepository()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Antigravity,
+            new MeetingSetup("小問題", new ProjectEntry { Name = "CYEnvelope" }, MeetingMode.RoundRobin, MeetingScale.Short),
+            Array.Empty<MeetingRemark>(),
+            1,
+            MeetingScale.Short);
+
+        // 不講清楚讀多少，它會把整個 repo 掃一遍，三百字的題目也能花上十分鐘。
+        Assert.Contains("Do not survey the repository", prompt);
+    }
+
+    [Fact]
+    public void DeepRounds_AreAllowedToInvestigateProperly()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Antigravity,
+            new MeetingSetup("大問題", new ProjectEntry { Name = "CYEnvelope" }, MeetingMode.RoundRobin, MeetingScale.Deep),
+            Array.Empty<MeetingRemark>(),
+            1,
+            MeetingScale.Deep);
+
+        Assert.Contains("investigate thoroughly", prompt);
     }
 
     [Theory]

@@ -87,7 +87,7 @@ public sealed class LinkFoldingLog
     }
 
     /// <summary>一條淡淡的分隔線，標示這個人講完了。</summary>
-    public void AppendDivider(int width = 80)
+    public void AppendDivider(int width = 60)
     {
         var start = _box.TextLength;
         _box.SelectionStart = start;
