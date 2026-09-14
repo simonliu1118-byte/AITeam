@@ -20,6 +20,45 @@ public enum VersionBump
     Major
 }
 
+/// <summary>
+/// 這一次修改任務能有多少獨立審查。三個角色（實作、挑戰、最終審查）由幾個 AI 分擔，
+/// 決定了把關強度，也決定了 AITeam 敢不敢自動合併。
+/// </summary>
+public enum ReviewMode
+{
+    /// <summary>三個 AI：三個角色三個人，輪次之間還會互換挑戰／審查身分。</summary>
+    Full,
+
+    /// <summary>兩個 AI：實作一個，挑戰與最終審查同一個（分兩次、換角度看）。</summary>
+    Degraded,
+
+    /// <summary>一個 AI：同一個 AI 分飾三角。風險強制拉到最高，AITeam 一定不會自動合併。</summary>
+    Restricted
+}
+
+public static class ReviewModeExtensions
+{
+    /// <summary>幾個 AI 可用就是哪一種模式。畫面與實際執行共用這一份判斷，不要各算各的。</summary>
+    public static ReviewMode ForProviderCount(int count) =>
+        count >= 3 ? ReviewMode.Full : count == 2 ? ReviewMode.Degraded : ReviewMode.Restricted;
+
+    public static string ToFriendlyName(this ReviewMode mode) => mode switch
+    {
+        ReviewMode.Full => "完整模式",
+        ReviewMode.Degraded => "降級模式",
+        ReviewMode.Restricted => "受限模式",
+        _ => mode.ToString()
+    };
+
+    public static string Describe(this ReviewMode mode) => mode switch
+    {
+        ReviewMode.Full => "三個 AI 分別負責實作、挑戰與最終審查，互相獨立。",
+        ReviewMode.Degraded => "兩個 AI：實作一個，挑戰與最終審查由同一個 AI 分兩次、換角度執行，獨立性下降。",
+        ReviewMode.Restricted => "只有一個 AI，實作與審查都是同一個，等於自己審自己。AITeam 一定不會自動合併，必須由你在 GitHub 上人工確認。",
+        _ => ""
+    };
+}
+
 public enum PlanGateStage
 {
     NeedsInput,
@@ -43,7 +82,8 @@ public sealed record ChangeTaskResult(
     ChangeRisk Risk,
     string Version,
     string Summary,
-    bool DegradedReview = false);
+    bool DegradedReview = false,
+    ReviewMode Mode = ReviewMode.Full);
 
 public sealed class ChangeTaskService
 {
@@ -91,8 +131,14 @@ public sealed class ChangeTaskService
             onStage(new TaskProgress(TaskKind.Change, stage, TaskActivity.Running, detail, who, round));
 
         var available = availableProviders.Distinct().ToList();
-        if (available.Count < 2)
-            throw new InvalidOperationException("修改任務至少需要兩個可用 AI，才能保留獨立實作與審查。請先恢復至少兩個 AI 後再送出。");
+        if (available.Count == 0)
+            throw new InvalidOperationException("目前沒有任何可用的 AI，無法進行修改任務。請先按「重新檢查」。");
+
+        // 以前少於兩個 AI 就整個拒絕，結果是「額度用完的日子修改功能完全不能用」。
+        // 改成分三種模式：能有幾個人把關就用幾個人，但把關強度要誠實反映在風險等級上。
+        var mode = ReviewModeExtensions.ForProviderCount(available.Count);
+        progress($"本次把關強度：{mode.ToFriendlyName()}（{available.Count} 個 AI 上線）。{mode.Describe()}");
+
         if (!Directory.Exists(project.RepoPath))
             throw new DirectoryNotFoundException($"找不到專案 Repo：{project.RepoPath}");
 
@@ -210,10 +256,20 @@ public sealed class ChangeTaskService
             if (degradedReview)
             {
                 finalProvider = challengeProvider;
-                progress($"⚠️ 僅 {available.Count} 個 AI 上線，Challenge 與 Final Review 將由同一個 AI（{challengeProvider.ToFriendlyName()}）執行，獨立性下降。");
+                progress($"⚠️ {mode.ToFriendlyName()}：Challenge 與 Final Review 由同一個 AI（{challengeProvider.ToFriendlyName()}）執行，獨立性下降。");
             }
 
-            if (degradedReview && risk == ChangeRisk.Low)
+            if (mode == ReviewMode.Restricted)
+            {
+                // 自己改自己審，AI 互審這一道等於沒有了。真正擋得住問題的只剩 CI 與人工合併，
+                // 所以風險直接拉到最高，確保 AITeam 絕對不會自己把它合併進去。
+                if (risk != ChangeRisk.High)
+                {
+                    progress($"⚠️ 受限模式：有效風險等級強制提升為 HIGH（原為 {risk}），合併一定要由你人工確認。");
+                    risk = ChangeRisk.High;
+                }
+            }
+            else if (degradedReview && risk == ChangeRisk.Low)
             {
                 risk = ChangeRisk.Normal;
                 progress("⚠️ 獨立審查被削弱本身就是風險因子，有效風險等級提升一級：LOW → NORMAL。");
@@ -231,7 +287,7 @@ public sealed class ChangeTaskService
                 lastFinalReviewer = roundFinal;
                 lastChallenger = roundChallenger;
                 if (degradedReview)
-                    progress($"⚠️ 僅 2 個 AI 上線，本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
+                    progress($"⚠️ {mode.ToFriendlyName()}：本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
 
                 var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
                 Stage(TaskStage.Review, "獨立挑戰目前的修改", roundChallenger, round + 1);
@@ -239,7 +295,7 @@ public sealed class ChangeTaskService
                 var challenge = await RunReadOnlyAsync(
                     roundChallenger,
                     workingDirectory,
-                    BuildChallengePrompt(request, plan, diff),
+                    BuildChallengePrompt(request, plan, diff, selfChallenge: roundChallenger == implementer),
                     cancellationToken);
 
                 Stage(TaskStage.Review, "最終審查", roundFinal, round + 1);
@@ -325,7 +381,7 @@ public sealed class ChangeTaskService
             if (pushTask.ExitCode != 0)
                 throw new InvalidOperationException("推送任務分支失敗：" + FirstUsefulLine(pushTask.StandardError, pushTask.StandardOutput));
 
-            var prBody = BuildPrBody(request, plan, risk, degradedReview, implementer, lastChallenger, lastFinalReviewer, newVersion, tag);
+            var prBody = BuildPrBody(request, plan, risk, mode, implementer, lastChallenger, lastFinalReviewer, newVersion, tag);
             var prNumber = await CreatePullRequestAsync(project, taskBranch, defaultBranch, commitMessage, prBody, cancellationToken);
             var prUrl = $"https://github.com/{project.GitHubRepo}/pull/{prNumber}";
             progress($"已開啟 PR #{prNumber}：{prUrl}");
@@ -407,8 +463,8 @@ public sealed class ChangeTaskService
             await _git.SafeSyncAsync(project.RepoPath, project.DefaultBranch, cancellationToken);
 
             var summary = $"修改已完成並合併：{project.Name} {newVersion}，PR：{prUrl}\r\n（版號已更新，但不會自動建立正式 tag／Release；需要正式發布時再另外觸發。）";
-            if (degradedReview)
-                summary += "\r\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升）。";
+            if (mode != ReviewMode.Full)
+                summary += $"\r\n⚠️ 本次為{mode.ToFriendlyName()}：{mode.Describe()}";
 
             return new ChangeTaskResult(
                 implementer,
@@ -416,7 +472,8 @@ public sealed class ChangeTaskService
                 risk,
                 newVersion,
                 summary,
-                degradedReview);
+                degradedReview,
+                mode);
         }
         finally
         {
@@ -994,8 +1051,9 @@ Approved plan:
 Implement the smallest complete change that satisfies the plan. Run the most relevant tests/build checks available in the repository. Do not commit, tag, push, merge, or modify files outside this worktree; AITeam controller owns Git formalization. At the end summarize changed files and tests run.
 """;
 
-    private static string BuildChallengePrompt(string request, string plan, string diff) => $"""
+    private static string BuildChallengePrompt(string request, string plan, string diff, bool selfChallenge) => $"""
 You are AITeam independent Challenger. Do not modify files. Review the implementation against the user request and approved plan. Look for regressions, missing edge cases, unsafe behavior, incorrect assumptions, and insufficient tests.
+{(selfChallenge ? "Note: you wrote this implementation yourself (only one AI is online, so there is no second opinion available). Nobody else will catch what you miss here. Read the diff as if a stranger wrote it and you were asked to find the flaw: check the code that is actually on disk rather than trusting what you intended to write.\n" : "")}
 Request: {request}
 Plan:
 {plan}
@@ -1017,7 +1075,7 @@ Independent challenge:
 {challenge}
 Diff:
 {diff}
-{(selfReview ? "\nNote: you already wrote the independent challenge above in this same round (only two AI are currently online). Now switch fully into the independent-reviewer role: be skeptical of your own earlier challenge and look for anything it missed or was too lenient about.\n" : "")}
+{(selfReview ? "\nNote: you already wrote the independent challenge above in this same round, because there are not enough AI online for a separate reviewer. The challenge pass looked for things that are wrong. This pass is a different angle: look for what is MISSING — parts of the request or the plan that were not implemented at all, tests that were not written, and side effects the challenge did not consider. Be skeptical of your own earlier challenge and assume it was too lenient.\n" : "")}
 First line MUST be exactly one of:
 AITeamReview: PASS
 AITeamReview: REPAIR
@@ -1076,20 +1134,21 @@ Then give your rationale in Traditional Chinese.
 """;
 
     private static string BuildPrBody(
-        string request, string plan, ChangeRisk risk, bool degradedReview,
+        string request, string plan, ChangeRisk risk, ReviewMode mode,
         ProviderId implementer, ProviderId challenger, ProviderId finalReviewer,
         string newVersion, string tag)
     {
-        var degradedNote = degradedReview
-            ? "\n\n⚠️ 本次任務僅 2 個 AI 上線，Challenge 與 Final Review 為同一 AI，獨立性下降（有效風險等級已提升一級）。"
-            : "";
+        var degradedNote = mode == ReviewMode.Full
+            ? ""
+            : $"\n\n⚠️ **{mode.ToFriendlyName()}**：{mode.Describe()}";
         return $"""
 ## AITeam 自動化變更
 
 **需求**：{request}
 
 **版本**：{newVersion}（未來正式發布時建議的 tag：{tag}；本次合併不會自動建立 tag／Release）
-**風險等級**：{risk}{degradedNote}
+**風險等級**：{risk}
+**把關強度**：{mode.ToFriendlyName()}{degradedNote}
 
 **執行角色**
 - Implementer：{implementer.ToFriendlyName()}

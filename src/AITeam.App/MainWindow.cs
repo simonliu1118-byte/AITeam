@@ -32,6 +32,7 @@ public sealed class MainWindow : Form
     private readonly CheckBox _pauseAfterImplement = new();
     private readonly CheckBox _applyNoteNow = new();
     private readonly Label _bottomHint = new();
+    private readonly AutoFitLabel _reviewModeLabel = new();
     private readonly Button _projectButton = new();
     private readonly Button _historyButton = new();
     private readonly StatusBadge _modeBadge = new();
@@ -377,7 +378,7 @@ public sealed class MainWindow : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Margin = new Padding(0, 16, 2, 0),
             BackColor = AppBackground
         };
@@ -436,12 +437,46 @@ public sealed class MainWindow : Form
 
         card.Controls.Add(grid);
         wrapper.Controls.Add(card, 0, 1);
+
+        _reviewModeLabel.Dock = DockStyle.Top;
+        _reviewModeLabel.Height = 18;
+        _reviewModeLabel.Font = new Font("Microsoft JhengHei UI", 8.5F);
+        _reviewModeLabel.BackColor = AppBackground;
+        _reviewModeLabel.Margin = new Padding(2, 6, 2, 0);
+        wrapper.Controls.Add(_reviewModeLabel, 0, 2);
+        UpdateReviewModeLabel();
         return wrapper;
+    }
+
+    /// <summary>
+    /// 現在按下去會是哪一種把關強度。這在送出之前就該看得到，不然使用者不知道
+    /// 這次修改會不會有第二個 AI 幫忙看。
+    /// </summary>
+    private void UpdateReviewModeLabel()
+    {
+        var count = _providerCards.Values.Count(c => c.SessionEnabled && c.State == ProviderHealthState.Online);
+        if (count == 0)
+        {
+            _reviewModeLabel.ForeColor = Color.FromArgb(145, 153, 163);
+            _reviewModeLabel.Text = "把關強度：目前沒有可用的 AI";
+            return;
+        }
+
+        var mode = ReviewModeExtensions.ForProviderCount(count);
+        _reviewModeLabel.ForeColor = mode switch
+        {
+            ReviewMode.Full => Color.FromArgb(46, 160, 92),
+            ReviewMode.Degraded => Color.FromArgb(214, 158, 46),
+            _ => Color.FromArgb(194, 58, 52)
+        };
+        _reviewModeLabel.Text = $"把關強度：{mode.ToFriendlyName()}（{count} 個 AI 可用）· {mode.Describe()}";
     }
 
     private void AddProviderRow(TableLayoutPanel grid, int row, ProviderId provider, string name)
     {
         var status = new ProviderStatusRow(provider, name);
+        // 勾選會改變「這一輪有幾個 AI 可用」，把關強度要跟著重算。
+        status.SessionEnabledChanged += (_, _) => UpdateReviewModeLabel();
         _providerCards[provider] = status;
         status.AddTo(grid, row);
     }
@@ -706,10 +741,12 @@ public sealed class MainWindow : Form
             AppendLog($"{item.Key.ToFriendlyName()}：{health.State.ToFriendlyName()} ({health.Duration.TotalSeconds:0.0}s)");
             // 只要 CLI 有話說就寫進紀錄。卡片上只有「錯誤」兩個字，看不出到底是額度用完、
             // 沒登入還是參數不合，等於無從查起；一次檢查成功但中途換過參數時也要留痕跡。
+            UpdateReviewModeLabel();
             if (!string.IsNullOrWhiteSpace(health.Detail))
                 AppendLog($"    └ CLI 回報：{health.Detail}");
         }
         _recheckButton.Enabled = true;
+        UpdateReviewModeLabel();
         AppendLog("AI 檢查完成。");
     }
 

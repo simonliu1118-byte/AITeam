@@ -36,12 +36,13 @@ public static class ProjectPreflight
                 "目前沒有可用的 AI",
                 "請先按「重新檢查」，至少要有一個 AI 上線才能送出任務。"));
         }
-        else if (onlineProviderCount == 1)
+        else if (onlineProviderCount < 3)
         {
+            var mode = ReviewModeExtensions.ForProviderCount(onlineProviderCount);
             issues.Add(new PreflightIssue(
                 PreflightSeverity.Warning,
-                "只有 1 個 AI 上線",
-                "查詢類的需求可以進行；修改類的需求需要至少 2 個 AI（一個實作、一個獨立審查），會在判斷出是修改任務後停下來。"));
+                $"把關強度：{mode.ToFriendlyName()}（{onlineProviderCount} 個 AI 可用）",
+                mode.Describe()));
         }
 
         if (!Directory.Exists(project.RepoPath))
