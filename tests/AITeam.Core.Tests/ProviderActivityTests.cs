@@ -22,6 +22,25 @@ public sealed class ProviderActivityTests
         Assert.Null(ProviderActivity.Describe(ProviderId.Codex, line));
     }
 
+    [Theory]
+    // Codex 在 Windows 上用 PowerShell 做事，找不到檔案時會吐出這一串。對它來說只是
+    // 換個方法再試，但顯示在「現在在做什麼」會讓人以為整件事失敗了——它後來照樣正常發言。
+    [InlineData("+ FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetContentCommand")]
+    [InlineData("+ CategoryInfo          : ObjectNotFound")]
+    [InlineData("At line:1 char:1")]
+    [InlineData("~~~~~~~~~~~~~~~")]
+    public void ErrorStackNoiseFromTheAisOwnTooling_IsNotShownAsActivity(string line)
+    {
+        Assert.Null(ProviderActivity.Describe(ProviderId.Codex, line));
+    }
+
+    [Fact]
+    public void RealProgressIsStillShown()
+    {
+        Assert.Equal("Reading apps/CYEnvelope/paintEnvelope.py",
+            ProviderActivity.Describe(ProviderId.Codex, "Reading apps/CYEnvelope/paintEnvelope.py"));
+    }
+
     [Fact]
     public void ToolNameIsThePreferredSignal_BecauseItSaysWhatTheAiIsActuallyDoing()
     {

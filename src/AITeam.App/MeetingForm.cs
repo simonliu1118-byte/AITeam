@@ -43,9 +43,6 @@ public sealed class MeetingForm : Form
     private readonly Button _concludeButton = new();
     private readonly Button _decideButton = new();
     private readonly Button _endButton = new();
-    private readonly Panel _waitingBar = new();
-    private readonly Label _waitingLabel = new();
-    private readonly Button _keepWaitingButton = new();
     private readonly Button _skipSpeakerButton = new();
     private readonly Button _stopRoundButton = new();
     private readonly System.Windows.Forms.Timer _softTimer = new() { Interval = 1000 };
@@ -62,6 +59,8 @@ public sealed class MeetingForm : Form
     private CancellationTokenSource? _speakerCts;
     private CancellationTokenSource? _roundCts;
     private ProviderId? _currentSpeaker;
+    // 「正在發言…」那段在逐字稿裡的起點，收到真正的發言後從這裡整段換掉。
+    private int _pendingMark = -1;
     private string _lastActivity = "";
     private readonly CancellationTokenSource _lifetime = new();
     private readonly DateTime _startedAt = DateTime.Now;
@@ -98,7 +97,7 @@ public sealed class MeetingForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 4,
             Padding = new Padding(18),
             BackColor = AppBackground
         };
@@ -107,14 +106,12 @@ public sealed class MeetingForm : Form
         shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(shell);
 
         shell.Controls.Add(BuildSetupCard(), 0, 0);
         shell.Controls.Add(BuildStatusRow(), 0, 1);
         shell.Controls.Add(BuildTranscriptCard(), 0, 2);
-        shell.Controls.Add(BuildWaitingBar(), 0, 3);
-        shell.Controls.Add(BuildChairRow(), 0, 4);
+        shell.Controls.Add(BuildChairRow(), 0, 3);
         UpdateControls();
     }
 
@@ -327,46 +324,6 @@ public sealed class MeetingForm : Form
         return card;
     }
 
-    private Control BuildWaitingBar()
-    {
-        // 這條在「有人正在發言」的時候就一直顯示，不是只有超時才出現：
-        // 使用者要隨時看得到是誰在講，也要隨時能跳過它或停掉整輪。
-        _waitingBar.Dock = DockStyle.Top;
-        _waitingBar.Height = 40;
-        _waitingBar.BackColor = Color.FromArgb(240, 244, 250);
-        _waitingBar.Visible = false;
-        _waitingBar.Margin = new Padding(0, 0, 0, 8);
-
-        _waitingLabel.AutoSize = false;
-        _waitingLabel.Dock = DockStyle.Fill;
-        _waitingLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _waitingLabel.ForeColor = Color.FromArgb(52, 66, 88);
-        _waitingLabel.Font = new Font("Microsoft JhengHei UI", 9F);
-        _waitingLabel.Padding = new Padding(10, 0, 0, 0);
-
-        ConfigureSecondaryButton(_stopRoundButton, "停止這一輪", 110);
-        _stopRoundButton.Dock = DockStyle.Right;
-        _stopRoundButton.ForeColor = Color.FromArgb(176, 54, 54);
-        _stopRoundButton.FlatAppearance.BorderColor = Color.FromArgb(227, 195, 195);
-        _stopRoundButton.Click += (_, _) => StopRound();
-
-        ConfigureSecondaryButton(_skipSpeakerButton, "跳過這家", 100);
-        _skipSpeakerButton.Dock = DockStyle.Right;
-        _skipSpeakerButton.Click += (_, _) => SkipCurrentSpeaker();
-
-        ConfigureSecondaryButton(_keepWaitingButton, "繼續等", 90);
-        _keepWaitingButton.Dock = DockStyle.Right;
-        _keepWaitingButton.Visible = false;
-        _keepWaitingButton.Click += (_, _) => KeepWaiting();
-
-        // 先加靠右的按鈕再加填滿的文字：WinForms 是後加入的先吃掉空間，
-        // 順序顛倒的話文字會把按鈕蓋住。
-        _waitingBar.Controls.Add(_stopRoundButton);
-        _waitingBar.Controls.Add(_skipSpeakerButton);
-        _waitingBar.Controls.Add(_keepWaitingButton);
-        _waitingBar.Controls.Add(_waitingLabel);
-        return _waitingBar;
-    }
 
     private Control BuildChairRow()
     {
@@ -382,28 +339,44 @@ public sealed class MeetingForm : Form
         _sayBox.Margin = new Padding(0, 4, 0, 8);
         row.Controls.Add(_sayBox, 0, 1);
 
-        var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 5 };
+        // 一列六顆按鈕，但同一時間只有一組用得上：有人在發言時只剩「跳過這家／停止這一輪」，
+        // 輪到使用者時只剩另外四顆。用顯示／隱藏切換，不必再多一條控制列。
+        var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 7 };
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (var i = 0; i < 4; i++) buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (var i = 0; i < 6; i++) buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        ConfigureSecondaryButton(_skipSpeakerButton, "跳過這家", 100);
+        _skipSpeakerButton.Margin = new Padding(0, 0, 8, 0);
+        _skipSpeakerButton.Visible = false;
+        _skipSpeakerButton.Click += (_, _) => SkipCurrentSpeaker();
+        buttons.Controls.Add(_skipSpeakerButton, 1, 0);
+
+        ConfigureSecondaryButton(_stopRoundButton, "停止這一輪", 110);
+        _stopRoundButton.Margin = new Padding(0, 0, 8, 0);
+        _stopRoundButton.ForeColor = Color.FromArgb(176, 54, 54);
+        _stopRoundButton.FlatAppearance.BorderColor = Color.FromArgb(227, 195, 195);
+        _stopRoundButton.Visible = false;
+        _stopRoundButton.Click += (_, _) => StopRound();
+        buttons.Controls.Add(_stopRoundButton, 2, 0);
 
         ConfigureSecondaryButton(_endButton, "結束會議", 100);
         _endButton.Margin = new Padding(0, 0, 8, 0);
         _endButton.Click += async (_, _) => await EndMeetingAsync(TaskOutcome.Cancelled);
-        buttons.Controls.Add(_endButton, 1, 0);
+        buttons.Controls.Add(_endButton, 3, 0);
 
         ConfigureSecondaryButton(_decideButton, "直接定案", 100);
         _decideButton.Margin = new Padding(0, 0, 8, 0);
         _decideButton.Click += async (_, _) => await DecideAsync();
-        buttons.Controls.Add(_decideButton, 2, 0);
+        buttons.Controls.Add(_decideButton, 4, 0);
 
         ConfigureSecondaryButton(_concludeButton, "請 AI 收斂結論", 130);
         _concludeButton.Margin = new Padding(0, 0, 8, 0);
         _concludeButton.Click += async (_, _) => await RunRoundAsync(concluding: true);
-        buttons.Controls.Add(_concludeButton, 3, 0);
+        buttons.Controls.Add(_concludeButton, 5, 0);
 
         ConfigurePrimaryButton(_nextRoundButton, "繼續下一輪", 130);
         _nextRoundButton.Click += async (_, _) => await RunRoundAsync(concluding: false);
-        buttons.Controls.Add(_nextRoundButton, 4, 0);
+        buttons.Controls.Add(_nextRoundButton, 6, 0);
 
         row.Controls.Add(buttons, 0, 2);
         return row;
@@ -480,7 +453,6 @@ public sealed class MeetingForm : Form
         finally
         {
             _running = false;
-            StopWaitingBar();
             UpdateControls();
         }
     }
@@ -513,7 +485,7 @@ public sealed class MeetingForm : Form
         // Gemini / Antigravity 光是啟動就比另外兩家慢很多（健康檢查 28 秒 vs 6～8 秒），
         // 用同一個 3 分鐘門檻會一直誤報「可能卡住了」，讓人以為它壞掉。
         _softTimeout = speaker == ProviderId.Antigravity ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(3);
-        ShowSpeakingBar(speaker);
+        ShowTurnPlaceholder(speaker);
         _softTimer.Start();
 
         try
@@ -532,25 +504,28 @@ public sealed class MeetingForm : Form
                 _speakerCts.Token);
 
             _transcriptEntries.Add(remark);
-            AppendRemark(remark);
+            ReplacePlaceholderWith(remark);
             if (remark.SuggestedScale is { } suggested && suggested != _scale) OfferScaleChange(speaker, suggested);
         }
         catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
         {
             var reason = _roundCts!.IsCancellationRequested ? "這一輪被你停止了" : "這一輪被你跳過了";
-            AppendSystemLine($"⚠️ {speaker.ToFriendlyName()} {reason}。");
-            _transcriptEntries.Add(new MeetingRemark(_round, speaker, $"（{reason}。）", Failed: true));
+            var skipped = new MeetingRemark(_round, speaker, $"（{reason}。）", Failed: true);
+            _transcriptEntries.Add(skipped);
+            ReplacePlaceholderWith(skipped);
         }
         catch (Exception ex)
         {
-            AppendSystemLine($"⚠️ {speaker.ToFriendlyName()} 這一輪失敗：{TextSummary.OneLine(ex.Message, 300)}");
-            _transcriptEntries.Add(new MeetingRemark(_round, speaker, "（這一輪失敗，沒有發言。）", Failed: true));
+            var failed = new MeetingRemark(
+                _round, speaker, $"（這一輪失敗：{TextSummary.OneLine(ex.Message, 300)}）", Failed: true);
+            _transcriptEntries.Add(failed);
+            ReplacePlaceholderWith(failed);
         }
         finally
         {
             _softTimer.Stop();
             _currentSpeaker = null;
-            StopWaitingBar();
+            _pendingMark = -1;
         }
     }
 
@@ -590,36 +565,23 @@ public sealed class MeetingForm : Form
         if (_currentSpeaker is not { } speaker) return;
 
         var elapsed = DateTime.UtcNow - _speakerStartedAt;
+        var warning = elapsed >= _softTimeout ? "　⚠ 想很久了，可按「跳過這家」" : "";
         SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中 {elapsed.Minutes:00}:{elapsed.Seconds:00}"
-            + (_lastActivity.Length == 0 ? "" : $"（{_lastActivity}）"));
-
-        // 軟逾時不砍，只是把這條列變成警示色並多給一顆「繼續等」。真的比較大的議題
-        // 不該因為時間到就被丟掉。
-        if (elapsed < _softTimeout || _keepWaitingButton.Visible) return;
-
-        _waitingBar.BackColor = Color.FromArgb(255, 247, 225);
-        _waitingLabel.ForeColor = Color.FromArgb(140, 94, 0);
-        _waitingLabel.Text = $"{speaker.ToFriendlyName()} 已經想了 {(int)elapsed.TotalMinutes} 分鐘，可能還在想，也可能卡住了。";
-        _keepWaitingButton.Visible = true;
+            + (_lastActivity.Length == 0 ? "" : $"（{_lastActivity}）")
+            + warning);
     }
 
-    private void ShowSpeakingBar(ProviderId speaker)
+    /// <summary>
+    /// 輪到誰就先把標題寫進逐字稿，讓「現在輪到誰」出現在內容裡而不是另一條列，
+    /// 底下再暫時放一行「正在發言…」，等真正的發言回來就整段換掉。
+    /// </summary>
+    private void ShowTurnPlaceholder(ProviderId speaker)
     {
-        _waitingBar.BackColor = Color.FromArgb(240, 244, 250);
-        _waitingLabel.ForeColor = Color.FromArgb(52, 66, 88);
-        _waitingLabel.Text = $"{speaker.ToFriendlyName()} 正在發言…";
-        _keepWaitingButton.Visible = false;
-        _waitingBar.Visible = true;
+        _pendingMark = _transcript.Mark();
+        _transcript.AppendHeading($"第 {_round} 輪 · {speaker.ToFriendlyName()}{Environment.NewLine}");
+        _transcript.Append($"正在發言…{Environment.NewLine}{Environment.NewLine}");
+        _transcript.ScrollToEnd();
         SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中 00:00");
-    }
-
-    private void KeepWaiting()
-    {
-        _softTimeout += TimeSpan.FromMinutes(3);
-        _keepWaitingButton.Visible = false;
-        _waitingBar.BackColor = Color.FromArgb(240, 244, 250);
-        _waitingLabel.ForeColor = Color.FromArgb(52, 66, 88);
-        if (_currentSpeaker is { } speaker) _waitingLabel.Text = $"{speaker.ToFriendlyName()} 正在發言…";
     }
 
     private void SkipCurrentSpeaker()
@@ -631,12 +593,6 @@ public sealed class MeetingForm : Form
     private void StopRound()
     {
         try { _roundCts?.Cancel(); } catch (ObjectDisposedException) { }
-    }
-
-    private void StopWaitingBar()
-    {
-        _waitingBar.Visible = false;
-        _keepWaitingButton.Visible = false;
     }
 
     private async Task DecideAsync()
@@ -678,6 +634,14 @@ public sealed class MeetingForm : Form
                 Result = lastAi is null ? "（沒有任何 AI 發言。）" : TextSummary.OneLine(lastAi.Text, 600)
             },
             transcript);
+    }
+
+    /// <summary>把「正在發言…」那一段換成真正的內容。</summary>
+    private void ReplacePlaceholderWith(MeetingRemark remark)
+    {
+        if (_pendingMark >= 0) _transcript.TruncateTo(_pendingMark);
+        _pendingMark = -1;
+        AppendRemark(remark);
     }
 
     private void AppendRemark(MeetingRemark remark)
@@ -723,10 +687,17 @@ public sealed class MeetingForm : Form
         _briefScaleBox.Enabled = idle;
 
         _sayBox.Enabled = started && idle;
-        _nextRoundButton.Enabled = started && idle;
-        _concludeButton.Enabled = started && idle && _round > 0;
-        _decideButton.Enabled = started && idle && _round > 0;
-        _endButton.Enabled = idle;
+        _nextRoundButton.Visible = idle;
+        _concludeButton.Visible = idle;
+        _decideButton.Visible = idle;
+        _endButton.Visible = idle;
+        _nextRoundButton.Enabled = started;
+        _concludeButton.Enabled = started && _round > 0;
+        _decideButton.Enabled = started && _round > 0;
+
+        // 有人在發言時，能做的只有跳過它或停掉這一輪。
+        _skipSpeakerButton.Visible = !idle;
+        _stopRoundButton.Visible = !idle;
 
         if (!started) SetStatus("尚未開始");
         else if (idle) SetStatus($"第 {_round} 輪結束，輪到你");
