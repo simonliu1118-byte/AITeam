@@ -42,6 +42,7 @@ public sealed class MeetingForm : Form
     private readonly Label _waitingLabel = new();
     private readonly Button _keepWaitingButton = new();
     private readonly Button _skipSpeakerButton = new();
+    private readonly Button _stopRoundButton = new();
     private readonly System.Windows.Forms.Timer _softTimer = new() { Interval = 1000 };
 
     private readonly List<MeetingRemark> _transcriptEntries = new();
@@ -54,6 +55,9 @@ public sealed class MeetingForm : Form
     private DateTime _speakerStartedAt;
     private TimeSpan _softTimeout = TimeSpan.FromMinutes(3);
     private CancellationTokenSource? _speakerCts;
+    private CancellationTokenSource? _roundCts;
+    private ProviderId? _currentSpeaker;
+    private string _lastActivity = "";
     private readonly CancellationTokenSource _lifetime = new();
     private readonly DateTime _startedAt = DateTime.Now;
 
@@ -143,6 +147,8 @@ public sealed class MeetingForm : Form
         _topicBox.TextChanged += (_, _) => UpdateControls();
         body.Controls.Add(_topicBox, 0, 1);
 
+        // 一列裡有標籤、三個下拉和一顆按鈕，高度各自不同。全部靠 Anchor = Left 垂直置中、
+        // 上下邊界留 0，它們才會落在同一條水平線上（先前標籤多給了上邊界，就會偏低）。
         var options = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 7, BackColor = CardBackground };
         options.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
@@ -151,23 +157,18 @@ public sealed class MeetingForm : Form
         options.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28F));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        options.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        _projectBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _projectBox.Dock = DockStyle.Fill;
-        _projectBox.Margin = new Padding(0, 0, 12, 0);
+        ConfigureCombo(_projectBox);
         _projectBox.Items.Add("不指定（純討論）");
         foreach (var project in _projects) _projectBox.Items.Add(project.Name);
         _projectBox.SelectedIndex = 0;
 
-        _modeBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _modeBox.Dock = DockStyle.Fill;
-        _modeBox.Margin = new Padding(0, 0, 12, 0);
+        ConfigureCombo(_modeBox);
         _modeBox.Items.AddRange(new object[] { "輪流發言（會收斂）", "各自作答（會發散）" });
         _modeBox.SelectedIndex = 0;
 
-        _scaleBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _scaleBox.Dock = DockStyle.Fill;
-        _scaleBox.Margin = new Padding(0, 0, 12, 0);
+        ConfigureCombo(_scaleBox);
         _scaleBox.Items.AddRange(new object[] { "簡短（約300字）", "標準（約800字）", "深入（約2000字）" });
         _scaleBox.SelectedIndex = 1;
         _scaleBox.SelectedIndexChanged += (_, _) => _scale = (MeetingScale)_scaleBox.SelectedIndex;
@@ -180,6 +181,9 @@ public sealed class MeetingForm : Form
         options.Controls.Add(_scaleBox, 5, 0);
 
         ConfigurePrimaryButton(_startButton, "開始會議", 110);
+        // 按鈕高度跟下拉一致，才不會一顆比旁邊高出一截。
+        _startButton.Height = _projectBox.PreferredHeight + 2;
+        _startButton.Anchor = AnchorStyles.Left;
         _startButton.Click += async (_, _) => await StartMeetingAsync();
         options.Controls.Add(_startButton, 6, 0);
 
@@ -224,18 +228,26 @@ public sealed class MeetingForm : Form
 
     private Control BuildWaitingBar()
     {
+        // 這條在「有人正在發言」的時候就一直顯示，不是只有超時才出現：
+        // 使用者要隨時看得到是誰在講，也要隨時能跳過它或停掉整輪。
         _waitingBar.Dock = DockStyle.Top;
         _waitingBar.Height = 40;
-        _waitingBar.BackColor = Color.FromArgb(255, 247, 225);
+        _waitingBar.BackColor = Color.FromArgb(240, 244, 250);
         _waitingBar.Visible = false;
         _waitingBar.Margin = new Padding(0, 0, 0, 8);
 
         _waitingLabel.AutoSize = false;
         _waitingLabel.Dock = DockStyle.Fill;
         _waitingLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _waitingLabel.ForeColor = Color.FromArgb(140, 94, 0);
+        _waitingLabel.ForeColor = Color.FromArgb(52, 66, 88);
         _waitingLabel.Font = new Font("Microsoft JhengHei UI", 9F);
         _waitingLabel.Padding = new Padding(10, 0, 0, 0);
+
+        ConfigureSecondaryButton(_stopRoundButton, "停止這一輪", 110);
+        _stopRoundButton.Dock = DockStyle.Right;
+        _stopRoundButton.ForeColor = Color.FromArgb(176, 54, 54);
+        _stopRoundButton.FlatAppearance.BorderColor = Color.FromArgb(227, 195, 195);
+        _stopRoundButton.Click += (_, _) => StopRound();
 
         ConfigureSecondaryButton(_skipSpeakerButton, "跳過這家", 100);
         _skipSpeakerButton.Dock = DockStyle.Right;
@@ -243,10 +255,12 @@ public sealed class MeetingForm : Form
 
         ConfigureSecondaryButton(_keepWaitingButton, "繼續等", 90);
         _keepWaitingButton.Dock = DockStyle.Right;
+        _keepWaitingButton.Visible = false;
         _keepWaitingButton.Click += (_, _) => KeepWaiting();
 
         // 先加靠右的按鈕再加填滿的文字：WinForms 是後加入的先吃掉空間，
-        // 順序顛倒的話文字會把兩顆按鈕蓋住。
+        // 順序顛倒的話文字會把按鈕蓋住。
+        _waitingBar.Controls.Add(_stopRoundButton);
         _waitingBar.Controls.Add(_skipSpeakerButton);
         _waitingBar.Controls.Add(_keepWaitingButton);
         _waitingBar.Controls.Add(_waitingLabel);
@@ -347,10 +361,17 @@ public sealed class MeetingForm : Form
         {
             RecordUserRemark(concluding);
 
+            _roundCts?.Dispose();
+            _roundCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+
             _round++;
             foreach (var speaker in MeetingService.SpeakingOrder(_participants, _round))
             {
-                if (_lifetime.IsCancellationRequested) return;
+                if (_roundCts.IsCancellationRequested)
+                {
+                    AppendSystemLine("這一輪已停止，剩下的 AI 不再發言。");
+                    return;
+                }
                 await AskOneAsync(speaker, concluding);
             }
         }
@@ -383,11 +404,13 @@ public sealed class MeetingForm : Form
     private async Task AskOneAsync(ProviderId speaker, bool concluding)
     {
         _speakerCts?.Dispose();
-        _speakerCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _speakerCts = CancellationTokenSource.CreateLinkedTokenSource(_roundCts!.Token);
+        _currentSpeaker = speaker;
+        _lastActivity = "";
         _speakerStartedAt = DateTime.UtcNow;
         _softTimeout = TimeSpan.FromMinutes(3);
+        ShowSpeakingBar(speaker);
         _softTimer.Start();
-        SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中…");
 
         try
         {
@@ -409,8 +432,9 @@ public sealed class MeetingForm : Form
         }
         catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
         {
-            AppendSystemLine($"⚠️ {speaker.ToFriendlyName()} 這一輪被你跳過了。");
-            _transcriptEntries.Add(new MeetingRemark(_round, speaker, "（這一輪被跳過。）", Failed: true));
+            var reason = _roundCts!.IsCancellationRequested ? "這一輪被你停止了" : "這一輪被你跳過了";
+            AppendSystemLine($"⚠️ {speaker.ToFriendlyName()} {reason}。");
+            _transcriptEntries.Add(new MeetingRemark(_round, speaker, $"（{reason}。）", Failed: true));
         }
         catch (Exception ex)
         {
@@ -420,9 +444,11 @@ public sealed class MeetingForm : Form
         finally
         {
             _softTimer.Stop();
+            _currentSpeaker = null;
             StopWaitingBar();
         }
     }
+
 
     private void OfferScaleChange(ProviderId speaker, MeetingScale suggested)
     {
@@ -456,31 +482,57 @@ public sealed class MeetingForm : Form
 
     private void CheckSoftTimeout()
     {
-        if (!_running || _speakerCts is null) return;
+        if (_currentSpeaker is not { } speaker) return;
 
         var elapsed = DateTime.UtcNow - _speakerStartedAt;
-        SetStatus($"第 {_round} 輪 · 發言中… 已經 {elapsed.Minutes:00}:{elapsed.Seconds:00}");
+        SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中 {elapsed.Minutes:00}:{elapsed.Seconds:00}"
+            + (_lastActivity.Length == 0 ? "" : $"（{_lastActivity}）"));
 
-        // 軟逾時不砍，只問你要不要等。真的比較大的議題不該因為時間到就被丟掉。
-        if (elapsed < _softTimeout || _waitingBar.Visible) return;
+        // 軟逾時不砍，只是把這條列變成警示色並多給一顆「繼續等」。真的比較大的議題
+        // 不該因為時間到就被丟掉。
+        if (elapsed < _softTimeout || _keepWaitingButton.Visible) return;
 
-        _waitingLabel.Text = $"已經等了 {(int)elapsed.TotalMinutes} 分鐘，它可能還在想，也可能卡住了。";
+        _waitingBar.BackColor = Color.FromArgb(255, 247, 225);
+        _waitingLabel.ForeColor = Color.FromArgb(140, 94, 0);
+        _waitingLabel.Text = $"{speaker.ToFriendlyName()} 已經想了 {(int)elapsed.TotalMinutes} 分鐘，可能還在想，也可能卡住了。";
+        _keepWaitingButton.Visible = true;
+    }
+
+    private void ShowSpeakingBar(ProviderId speaker)
+    {
+        _waitingBar.BackColor = Color.FromArgb(240, 244, 250);
+        _waitingLabel.ForeColor = Color.FromArgb(52, 66, 88);
+        _waitingLabel.Text = $"{speaker.ToFriendlyName()} 正在發言…";
+        _keepWaitingButton.Visible = false;
         _waitingBar.Visible = true;
+        SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中 00:00");
     }
 
     private void KeepWaiting()
     {
         _softTimeout += TimeSpan.FromMinutes(3);
-        StopWaitingBar();
+        _keepWaitingButton.Visible = false;
+        _waitingBar.BackColor = Color.FromArgb(240, 244, 250);
+        _waitingLabel.ForeColor = Color.FromArgb(52, 66, 88);
+        if (_currentSpeaker is { } speaker) _waitingLabel.Text = $"{speaker.ToFriendlyName()} 正在發言…";
     }
 
     private void SkipCurrentSpeaker()
     {
-        StopWaitingBar();
         try { _speakerCts?.Cancel(); } catch (ObjectDisposedException) { }
     }
 
-    private void StopWaitingBar() => _waitingBar.Visible = false;
+    /// <summary>停掉這一輪：目前這家中斷，後面排隊的也不會再發言，但會議本身還在。</summary>
+    private void StopRound()
+    {
+        try { _roundCts?.Cancel(); } catch (ObjectDisposedException) { }
+    }
+
+    private void StopWaitingBar()
+    {
+        _waitingBar.Visible = false;
+        _keepWaitingButton.Visible = false;
+    }
 
     private async Task DecideAsync()
     {
@@ -548,7 +600,7 @@ public sealed class MeetingForm : Form
             BeginInvoke(new Action<string>(ReportActivity), text);
             return;
         }
-        SetStatus($"第 {_round} 輪 · {text}");
+        _lastActivity = text;
     }
 
     private void SetStatus(string text) =>
@@ -613,9 +665,21 @@ public sealed class MeetingForm : Form
         AutoSize = true,
         ForeColor = SecondaryText,
         Font = new Font("Microsoft JhengHei UI", 9F),
+        // Anchor = Left（沒有 Top）讓它在整列裡垂直置中；上下邊界一定要是 0，
+        // 給了上邊界就會被往下推，看起來就跟旁邊的下拉沒對齊。
         Anchor = AnchorStyles.Left,
-        Margin = new Padding(0, 7, 6, 0)
+        Margin = new Padding(0, 0, 6, 0)
     };
+
+    private static void ConfigureCombo(ComboBox box)
+    {
+        box.DropDownStyle = ComboBoxStyle.DropDownList;
+        box.Dock = DockStyle.Fill;
+        box.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        box.Font = new Font("Microsoft JhengHei UI", 9.5F);
+        box.Margin = new Padding(0, 0, 12, 0);
+        box.MaxDropDownItems = 20;
+    }
 
     private static void ConfigureSecondaryButton(Button button, string text, int width)
     {

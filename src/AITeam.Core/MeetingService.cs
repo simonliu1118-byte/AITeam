@@ -187,10 +187,14 @@ public sealed class MeetingService
         int round,
         MeetingScale scale)
     {
+        // 失敗或被跳過的那幾則沒有內容（「（這一輪失敗，沒有發言。）」），
+        // 放進逐字稿只會變成雜訊，還可能被後面的人拿去發揮。
+        var usable = transcript.Where(r => !r.Failed).ToList();
+
         var visible = setup.Mode == MeetingMode.RoundRobin
-            ? transcript
+            ? usable
             // 各自作答：只看得到使用者說過的話，看不到其他 AI 的發言。
-            : transcript.Where(r => r.Speaker is null).ToList();
+            : usable.Where(r => r.Speaker is null).ToList();
 
         var history = visible.Count == 0
             ? "（還沒有任何發言。）"

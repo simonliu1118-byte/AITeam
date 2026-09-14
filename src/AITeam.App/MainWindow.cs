@@ -33,11 +33,12 @@ public sealed class MainWindow : Form
     private readonly CheckBox _pauseAfterImplement = new();
     private readonly CheckBox _applyNoteNow = new();
     private readonly Label _bottomHint = new();
-    private readonly AutoFitLabel _reviewModeLabel = new();
     private readonly Button _projectButton = new();
     private readonly Button _historyButton = new();
     private readonly Button _meetingButton = new();
     private readonly StatusBadge _modeBadge = new();
+    private readonly StatusBadge _reviewBadge = new();
+    private readonly ToolTip _reviewTip = new() { InitialDelay = 250, ShowAlways = true };
     private readonly Label _currentTaskState = new();
     private readonly Label _taskClock = new();
     private readonly TaskStageStrip _stageStrip = new();
@@ -168,19 +169,36 @@ public sealed class MainWindow : Form
             Location = new Point(24, 44)
         };
 
-        _modeBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _modeBadge.BackColor = CardBackground;
+        // 會議是跟「送任務」不同性質的功能，所以樣式也要不一樣：實心強調色的膠囊，
+        // 放在產品名稱旁邊，而不是混在 AI 狀態那排普通按鈕裡。
+        _meetingButton.Text = "＋ 發起會議";
+        _meetingButton.AutoSize = false;
+        _meetingButton.Size = new Size(118, 30);
+        _meetingButton.FlatStyle = FlatStyle.Flat;
+        _meetingButton.FlatAppearance.BorderSize = 0;
+        _meetingButton.BackColor = Color.FromArgb(63, 81, 181);
+        _meetingButton.ForeColor = Color.White;
+        _meetingButton.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
+        _meetingButton.Cursor = Cursors.Hand;
+        _meetingButton.Location = new Point(title.PreferredWidth + 34, 18);
+        _meetingButton.Click += (_, _) => OpenMeeting();
+
+        // 右上角固定顯示把關強度（完整／降級／受限）。詳情放 tooltip，不要把一長串
+        // 說明塞在畫面上——字會被縮到看不清楚。
+        _reviewBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _reviewBadge.BackColor = CardBackground;
 
         header.Controls.Add(title);
         header.Controls.Add(version);
-        header.Controls.Add(_modeBadge);
+        header.Controls.Add(_meetingButton);
+        header.Controls.Add(_reviewBadge);
 
         void PositionBadge() =>
-            _modeBadge.Location = new Point(Math.Max(0, header.ClientSize.Width - _modeBadge.Width - 22), 20);
+            _reviewBadge.Location = new Point(Math.Max(0, header.ClientSize.Width - _reviewBadge.Width - 22), 20);
 
-        // 徽章寬度會隨文字變動（「待命」↔「實作中 4/7」），所以寬度變了也要重新靠右。
+        // 徽章寬度會隨文字變動，所以寬度變了也要重新靠右。
         header.Resize += (_, _) => PositionBadge();
-        _modeBadge.SizeChanged += (_, _) => PositionBadge();
+        _reviewBadge.SizeChanged += (_, _) => PositionBadge();
         PositionBadge();
         return header;
     }
@@ -381,7 +399,7 @@ public sealed class MainWindow : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             Margin = new Padding(0, 16, 2, 0),
             BackColor = AppBackground
         };
@@ -391,12 +409,11 @@ public sealed class MainWindow : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            ColumnCount = 3,
+            ColumnCount = 2,
             Margin = new Padding(0, 0, 0, 8),
             BackColor = AppBackground
         };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.Controls.Add(SectionTitle("AI 狀態", new Padding(2, 7, 0, 0)), 0, 0);
 
@@ -409,18 +426,7 @@ public sealed class MainWindow : Form
         _recheckButton.FlatAppearance.BorderColor = BorderColor;
         _recheckButton.Click += async (_, _) => await RecheckProvidersAsync();
 
-        _meetingButton.Text = "發起會議";
-        _meetingButton.AutoSize = false;
-        _meetingButton.Size = new Size(94, 32);
-        _meetingButton.FlatStyle = FlatStyle.Flat;
-        _meetingButton.BackColor = Color.White;
-        _meetingButton.ForeColor = PrimaryText;
-        _meetingButton.FlatAppearance.BorderColor = BorderColor;
-        _meetingButton.Margin = new Padding(0, 0, 8, 0);
-        _meetingButton.Click += (_, _) => OpenMeeting();
-
-        titleRow.Controls.Add(_meetingButton, 1, 0);
-        titleRow.Controls.Add(_recheckButton, 2, 0);
+        titleRow.Controls.Add(_recheckButton, 1, 0);
         wrapper.Controls.Add(titleRow, 0, 0);
 
         var card = new RoundedCard
@@ -454,12 +460,6 @@ public sealed class MainWindow : Form
         card.Controls.Add(grid);
         wrapper.Controls.Add(card, 0, 1);
 
-        _reviewModeLabel.Dock = DockStyle.Top;
-        _reviewModeLabel.Height = 18;
-        _reviewModeLabel.Font = new Font("Microsoft JhengHei UI", 8.5F);
-        _reviewModeLabel.BackColor = AppBackground;
-        _reviewModeLabel.Margin = new Padding(2, 6, 2, 0);
-        wrapper.Controls.Add(_reviewModeLabel, 0, 2);
         UpdateReviewModeLabel();
         return wrapper;
     }
@@ -473,19 +473,24 @@ public sealed class MainWindow : Form
         var count = _providerCards.Values.Count(c => c.SessionEnabled && c.State == ProviderHealthState.Online);
         if (count == 0)
         {
-            _reviewModeLabel.ForeColor = Color.FromArgb(145, 153, 163);
-            _reviewModeLabel.Text = "把關強度：目前沒有可用的 AI";
+            _reviewBadge.SetStatus(
+                "沒有可用 AI", "",
+                Color.FromArgb(240, 242, 245), Color.FromArgb(101, 108, 117),
+                Color.FromArgb(145, 153, 163), Color.Empty);
+            _reviewTip.SetToolTip(_reviewBadge, "目前沒有任何 AI 上線，按「重新檢查」再試一次。");
             return;
         }
 
         var mode = ReviewModeExtensions.ForProviderCount(count);
-        _reviewModeLabel.ForeColor = mode switch
+        var (fill, fore, dot) = mode switch
         {
-            ReviewMode.Full => Color.FromArgb(46, 160, 92),
-            ReviewMode.Degraded => Color.FromArgb(214, 158, 46),
-            _ => Color.FromArgb(194, 58, 52)
+            ReviewMode.Full => (Color.FromArgb(236, 248, 240), Color.FromArgb(36, 122, 72), Color.FromArgb(46, 160, 92)),
+            ReviewMode.Degraded => (Color.FromArgb(255, 247, 225), Color.FromArgb(158, 104, 0), Color.FromArgb(214, 158, 46)),
+            _ => (Color.FromArgb(251, 237, 236), Color.FromArgb(176, 54, 54), Color.FromArgb(194, 58, 52))
         };
-        _reviewModeLabel.Text = $"把關強度：{mode.ToFriendlyName()}（{count} 個 AI 可用）· {mode.Describe()}";
+
+        _reviewBadge.SetStatus(mode.ToFriendlyName(), "", fill, fore, dot, Color.Empty);
+        _reviewTip.SetToolTip(_reviewBadge, $"{count} 個 AI 可用。{mode.Describe()}");
     }
 
     private void AddProviderRow(TableLayoutPanel grid, int row, ProviderId provider, string name)
@@ -516,10 +521,17 @@ public sealed class MainWindow : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         parent.Controls.Add(layout);
 
-        var currentTitleRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
+        var currentTitleRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Margin = Padding.Empty };
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         currentTitleRow.Controls.Add(SectionTitle("目前任務", new Padding(2, 4, 0, 7)), 0, 0);
+
+        // 待命／執行中講的是「目前任務」的狀態，就放在它旁邊；右上角讓給把關強度。
+        _modeBadge.BackColor = AppBackground;
+        _modeBadge.Anchor = AnchorStyles.Right;
+        _modeBadge.Margin = new Padding(0, 0, 10, 7);
+        currentTitleRow.Controls.Add(_modeBadge, 1, 0);
 
         _historyButton.Text = "歷史任務";
         _historyButton.AutoSize = false;
@@ -530,7 +542,7 @@ public sealed class MainWindow : Form
         _historyButton.Margin = new Padding(0, 0, 2, 7);
         _historyButton.FlatAppearance.BorderColor = BorderColor;
         _historyButton.Click += (_, _) => OpenTaskHistory();
-        currentTitleRow.Controls.Add(_historyButton, 1, 0);
+        currentTitleRow.Controls.Add(_historyButton, 2, 0);
         layout.Controls.Add(currentTitleRow, 0, 0);
 
         var currentCard = new RoundedCard
@@ -565,6 +577,7 @@ public sealed class MainWindow : Form
         _currentTaskState.ForeColor = SecondaryText;
         _currentTaskState.Font = new Font("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
         _currentTaskState.Margin = Padding.Empty;
+        _currentTaskState.Visible = false;
         _taskClock.AutoSize = true;
         _taskClock.Text = "";
         _taskClock.ForeColor = SecondaryText;

@@ -116,27 +116,7 @@ public sealed class ProcessRunner : IProcessRunner
         }
 
         var start = DateTimeOffset.UtcNow;
-        var psi = new ProcessStartInfo
-        {
-            FileName = executable,
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = standardInput is not null,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-
-        foreach (var argument in arguments)
-        {
-            psi.ArgumentList.Add(argument);
-        }
-
-        psi.Environment["NO_COLOR"] = "1";
-        psi.Environment["POWERSHELL_TELEMETRY_OPTOUT"] = "1";
+        var psi = CreateStartInfo(executable, arguments, workingDirectory, standardInput);
 
         using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -197,6 +177,43 @@ public sealed class ProcessRunner : IProcessRunner
         var duration = DateTimeOffset.UtcNow - start;
 
         return new ProcessRunResult(process.ExitCode, stdout, stderr, duration);
+    }
+
+    /// <summary>
+    /// 建立行程啟動設定。抽出來是為了測得到——尤其是 stdin 的編碼。
+    /// </summary>
+    internal static ProcessStartInfo CreateStartInfo(
+        string executable,
+        IEnumerable<string> arguments,
+        string workingDirectory,
+        string? standardInput)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            // stdin 的編碼一定要跟著指定成 UTF-8（不含 BOM）。沒有指定時 .NET 會用系統的
+            // ANSI 代碼頁（在繁體中文 Windows 上是 CP950），提示裡只要有中文，CLI 收到的
+            // 就是不合法的 UTF-8，會直接以
+            // 「input is not valid UTF-8 (invalid byte at offset N)」失敗。
+            // 只有從 stdin 收提示的 CLI（Codex、Antigravity）會踩到；Claude 用參數傳提示，
+            // 所以同一份中文提示它收得到、另外兩家收不到。
+            StandardInputEncoding = standardInput is null ? null : new UTF8Encoding(false)
+        };
+
+        foreach (var argument in arguments) psi.ArgumentList.Add(argument);
+
+        psi.Environment["NO_COLOR"] = "1";
+        psi.Environment["POWERSHELL_TELEMETRY_OPTOUT"] = "1";
+        return psi;
     }
 
     private static async Task<string> ReadAllAsync(StreamReader reader, Action<string>? onOutputLine)
