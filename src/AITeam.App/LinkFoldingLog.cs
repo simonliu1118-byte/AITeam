@@ -71,6 +71,43 @@ public sealed class LinkFoldingLog
         _box.SelectionColor = _box.ForeColor;
     }
 
+    /// <summary>發言者那一行：粗體＋強調色，讓使用者一眼就掃得到是誰在講。</summary>
+    public void AppendHeading(string text)
+    {
+        var start = _box.TextLength;
+        _box.SelectionStart = start;
+        _box.SelectionLength = 0;
+        _box.AppendText(text);
+
+        _box.Select(start, _box.TextLength - start);
+        _box.SelectionColor = LinkColor;
+        _box.SelectionFont = new Font(_box.Font, FontStyle.Bold);
+
+        ResetCaretStyle();
+    }
+
+    /// <summary>一條淡淡的分隔線，標示這個人講完了。</summary>
+    public void AppendDivider(int width = 80)
+    {
+        var start = _box.TextLength;
+        _box.SelectionStart = start;
+        _box.SelectionLength = 0;
+        _box.AppendText(new string('─', width) + "\n");
+
+        _box.Select(start, _box.TextLength - start);
+        _box.SelectionColor = Color.FromArgb(214, 221, 229);
+
+        ResetCaretStyle();
+    }
+
+    private void ResetCaretStyle()
+    {
+        _box.SelectionStart = _box.TextLength;
+        _box.SelectionLength = 0;
+        _box.SelectionColor = _box.ForeColor;
+        _box.SelectionFont = _box.Font;
+    }
+
     public void ScrollToTop()
     {
         _box.SelectionStart = 0;

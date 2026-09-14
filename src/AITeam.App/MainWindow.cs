@@ -305,7 +305,11 @@ public sealed class MainWindow : Form
 
         _sendButton.Text = "送出";
         _sendButton.AutoSize = false;
-        _sendButton.Size = new Size(116, 42);
+        // 兩顆按鈕的尺寸、邊界與垂直對齊必須一致；先前「送出」沿用預設的 3px 邊界、
+        // 又沒有指定 Anchor，就會跟旁邊的「停止」差半格。
+        _sendButton.Size = new Size(108, 40);
+        _sendButton.Anchor = AnchorStyles.Left;
+        _sendButton.Margin = Padding.Empty;
         _sendButton.FlatStyle = FlatStyle.Flat;
         _sendButton.FlatAppearance.BorderSize = 0;
         _sendButton.BackColor = Accent;
@@ -316,13 +320,14 @@ public sealed class MainWindow : Form
 
         _stopButton.Text = "停止";
         _stopButton.AutoSize = false;
-        _stopButton.Size = new Size(84, 42);
+        _stopButton.Size = new Size(108, 40);
+        _stopButton.Anchor = AnchorStyles.Left;
         _stopButton.FlatStyle = FlatStyle.Flat;
         _stopButton.BackColor = Color.White;
         _stopButton.ForeColor = Color.FromArgb(176, 54, 54);
         _stopButton.FlatAppearance.BorderColor = Color.FromArgb(227, 195, 195);
         _stopButton.Font = new Font("Microsoft JhengHei UI", 10.5F, FontStyle.Bold);
-        _stopButton.Margin = new Padding(0, 0, 8, 0);
+        _stopButton.Margin = new Padding(0, 0, 10, 0);
         _stopButton.Click += (_, _) => StopCurrentTask();
 
         bottom.Controls.Add(_stopButton, 1, 0);
@@ -521,16 +526,19 @@ public sealed class MainWindow : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         parent.Controls.Add(layout);
 
-        var currentTitleRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Margin = Padding.Empty };
-        currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        // 欄位順序：標題｜狀態徽章｜彈性空白｜歷史任務。徽章緊跟在標題後面（留一點間距），
+        // 而不是被彈性欄推到最右邊跟按鈕擠在一起。
+        var currentTitleRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 4, Margin = Padding.Empty };
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         currentTitleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         currentTitleRow.Controls.Add(SectionTitle("目前任務", new Padding(2, 4, 0, 7)), 0, 0);
 
         // 待命／執行中講的是「目前任務」的狀態，就放在它旁邊；右上角讓給把關強度。
         _modeBadge.BackColor = AppBackground;
-        _modeBadge.Anchor = AnchorStyles.Right;
-        _modeBadge.Margin = new Padding(0, 0, 10, 7);
+        _modeBadge.Anchor = AnchorStyles.Left;
+        _modeBadge.Margin = new Padding(12, 0, 0, 7);
         currentTitleRow.Controls.Add(_modeBadge, 1, 0);
 
         _historyButton.Text = "歷史任務";
@@ -542,7 +550,7 @@ public sealed class MainWindow : Form
         _historyButton.Margin = new Padding(0, 0, 2, 7);
         _historyButton.FlatAppearance.BorderColor = BorderColor;
         _historyButton.Click += (_, _) => OpenTaskHistory();
-        currentTitleRow.Controls.Add(_historyButton, 2, 0);
+        currentTitleRow.Controls.Add(_historyButton, 3, 0);
         layout.Controls.Add(currentTitleRow, 0, 0);
 
         var currentCard = new RoundedCard
