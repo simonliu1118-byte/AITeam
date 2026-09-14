@@ -29,6 +29,11 @@ public sealed class MeetingForm : Form
     private readonly ComboBox _modeBox = new();
     private readonly ComboBox _scaleBox = new();
     private readonly Button _startButton = new();
+    private readonly Panel _setupPanel = new();
+    private readonly Panel _briefPanel = new();
+    private readonly Label _briefTopic = new();
+    private readonly Label _briefMeta = new();
+    private readonly ComboBox _briefScaleBox = new();
 
     private readonly Label _statusLabel = new();
     private readonly RichTextBox _transcriptBox = new();
@@ -126,6 +131,21 @@ public sealed class MeetingForm : Form
             Margin = new Padding(0, 0, 0, 10)
         };
 
+        // 同一張卡片裡有兩個面板：還沒開始時是設定表單，開始之後換成置頂的議題摘要。
+        // 議題在整場會議裡都要看得到，而設定一旦開始就不該再被改。
+        var host = new Panel { Dock = DockStyle.Top, AutoSize = true, BackColor = CardBackground };
+        host.Controls.Add(BuildBriefPanel());
+        host.Controls.Add(BuildSetupPanel());
+        card.Controls.Add(host);
+        return card;
+    }
+
+    private Control BuildSetupPanel()
+    {
+        _setupPanel.Dock = DockStyle.Top;
+        _setupPanel.AutoSize = true;
+        _setupPanel.BackColor = CardBackground;
+
         var body = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -169,9 +189,9 @@ public sealed class MeetingForm : Form
         _modeBox.SelectedIndex = 0;
 
         ConfigureCombo(_scaleBox);
-        _scaleBox.Items.AddRange(new object[] { "簡短（約300字）", "標準（約800字）", "深入（約2000字）" });
+        _scaleBox.Items.AddRange(ScaleChoices());
         _scaleBox.SelectedIndex = 1;
-        _scaleBox.SelectedIndexChanged += (_, _) => _scale = (MeetingScale)_scaleBox.SelectedIndex;
+        _scaleBox.SelectedIndexChanged += (_, _) => ApplyScale((MeetingScale)_scaleBox.SelectedIndex);
 
         options.Controls.Add(MakeInlineLabel("專案"), 0, 0);
         options.Controls.Add(_projectBox, 1, 0);
@@ -188,9 +208,89 @@ public sealed class MeetingForm : Form
         options.Controls.Add(_startButton, 6, 0);
 
         body.Controls.Add(options, 0, 2);
-        card.Controls.Add(body);
-        return card;
+        _setupPanel.Controls.Add(body);
+        return _setupPanel;
     }
+
+    private Control BuildBriefPanel()
+    {
+        _briefPanel.Dock = DockStyle.Top;
+        _briefPanel.AutoSize = true;
+        _briefPanel.BackColor = CardBackground;
+        _briefPanel.Visible = false;
+
+        var body = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 3,
+            RowCount = 3,
+            BackColor = CardBackground
+        };
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var caption = MakeFieldLabel("議題");
+        body.Controls.Add(caption, 0, 0);
+
+        body.Controls.Add(MakeInlineLabel("規模"), 1, 0);
+        ConfigureCombo(_briefScaleBox);
+        _briefScaleBox.Width = 150;
+        _briefScaleBox.Dock = DockStyle.None;
+        _briefScaleBox.Anchor = AnchorStyles.Left;
+        _briefScaleBox.Margin = new Padding(0, 0, 0, 0);
+        _briefScaleBox.Items.AddRange(ScaleChoices());
+        _briefScaleBox.SelectedIndex = 1;
+        _briefScaleBox.SelectedIndexChanged += (_, _) => ApplyScale((MeetingScale)_briefScaleBox.SelectedIndex);
+        body.Controls.Add(_briefScaleBox, 2, 0);
+
+        _briefTopic.AutoSize = true;
+        _briefTopic.MaximumSize = new Size(880, 0);
+        _briefTopic.Font = new Font("Microsoft JhengHei UI", 11F, FontStyle.Bold);
+        _briefTopic.ForeColor = PrimaryText;
+        _briefTopic.Margin = new Padding(2, 4, 0, 8);
+        body.SetColumnSpan(_briefTopic, 3);
+        body.Controls.Add(_briefTopic, 0, 1);
+
+        _briefMeta.AutoSize = true;
+        _briefMeta.MaximumSize = new Size(880, 0);
+        _briefMeta.Font = new Font("Microsoft JhengHei UI", 9F);
+        _briefMeta.ForeColor = SecondaryText;
+        _briefMeta.Margin = new Padding(2, 0, 0, 0);
+        body.SetColumnSpan(_briefMeta, 3);
+        body.Controls.Add(_briefMeta, 0, 2);
+
+        _briefPanel.Controls.Add(body);
+        return _briefPanel;
+    }
+
+    private static object[] ScaleChoices() =>
+        new object[] { "簡短（約300字）", "標準（約800字）", "深入（約2000字）" };
+
+    /// <summary>兩個規模下拉（設定區、置頂摘要）要一起跟著走，不能各講各的。</summary>
+    private void ApplyScale(MeetingScale scale)
+    {
+        if (_scale == scale) return;
+        _scale = scale;
+        if (_scaleBox.SelectedIndex != (int)scale) _scaleBox.SelectedIndex = (int)scale;
+        if (_briefScaleBox.SelectedIndex != (int)scale) _briefScaleBox.SelectedIndex = (int)scale;
+        UpdateBrief();
+    }
+
+    private void UpdateBrief()
+    {
+        if (_setup is null) return;
+
+        _briefTopic.Text = _setup.Topic;
+        _briefMeta.Text =
+            $"參與者：{string.Join("、", _participants.Select(p => p.ToFriendlyName()))}"
+            + $"　·　{(_setup.Mode == MeetingMode.RoundRobin ? "輪流發言" : "各自作答")}"
+            + $"　·　規模：{_scale.ToFriendlyName()}（約 {_scale.WordBudget()} 字）"
+            + $"　·　專案：{_setup.Project?.Name ?? "不指定"}"
+            + $"　·　已呼叫 {_calls} 次";
+    }
+
 
     private Control BuildStatusRow()
     {
@@ -200,6 +300,7 @@ public sealed class MeetingForm : Form
         _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
         _statusLabel.ForeColor = SecondaryText;
         _statusLabel.Font = new Font("Microsoft JhengHei UI", 9F);
+        _statusLabel.AutoEllipsis = true;
         _statusLabel.Margin = new Padding(2, 0, 0, 6);
         return _statusLabel;
     }
@@ -340,10 +441,11 @@ public sealed class MeetingForm : Form
 
         _transcript.Clear();
         _transcriptEntries.Clear();
-        AppendSystemLine($"議題：{topic}");
-        AppendSystemLine($"參與者：{string.Join("、", _participants.Select(p => p.ToFriendlyName()))}"
-            + $"｜模式：{_modeBox.Text}｜規模：{_scale.ToFriendlyName()}"
-            + $"｜專案：{project?.Name ?? "不指定"}");
+
+        // 議題與參與者改成置頂顯示，不再當成逐字稿的第一則訊息——那會被後面的發言捲走。
+        _setupPanel.Visible = false;
+        _briefPanel.Visible = true;
+        UpdateBrief();
 
         _running = false;
         await RunRoundAsync(concluding: false);
@@ -408,13 +510,16 @@ public sealed class MeetingForm : Form
         _currentSpeaker = speaker;
         _lastActivity = "";
         _speakerStartedAt = DateTime.UtcNow;
-        _softTimeout = TimeSpan.FromMinutes(3);
+        // Gemini / Antigravity 光是啟動就比另外兩家慢很多（健康檢查 28 秒 vs 6～8 秒），
+        // 用同一個 3 分鐘門檻會一直誤報「可能卡住了」，讓人以為它壞掉。
+        _softTimeout = speaker == ProviderId.Antigravity ? TimeSpan.FromMinutes(5) : TimeSpan.FromMinutes(3);
         ShowSpeakingBar(speaker);
         _softTimer.Start();
 
         try
         {
             _calls++;
+            UpdateBrief();
             var remark = await _meetings.AskAsync(
                 speaker,
                 _setup! with { Mode = concluding ? MeetingMode.RoundRobin : _setup!.Mode },
@@ -462,8 +567,8 @@ public sealed class MeetingForm : Form
             MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes) return;
 
-        _scale = suggested;
-        _scaleBox.SelectedIndex = (int)suggested;
+        // 走同一個入口，兩個規模下拉才會一起跟著變。
+        ApplyScale(suggested);
         AppendSystemLine($"討論規模已改成「{suggested.ToFriendlyName()}」，下一輪開始生效。");
     }
 
@@ -577,8 +682,11 @@ public sealed class MeetingForm : Form
 
     private void AppendRemark(MeetingRemark remark)
     {
-        _transcript.Append(
-            $"【第 {remark.Round} 輪 · {remark.SpeakerName}】{Environment.NewLine}{remark.Text}{Environment.NewLine}{Environment.NewLine}");
+        _transcript.AppendHeading($"第 {remark.Round} 輪 · {remark.SpeakerName}{Environment.NewLine}");
+        _transcript.Append(remark.Text + Environment.NewLine);
+        // 每則發言後面畫一條線，使用者才知道這個人講完了、下面是另一個人。
+        _transcript.AppendDivider();
+        _transcript.Append(Environment.NewLine);
         _transcript.ScrollToEnd();
     }
 
@@ -603,19 +711,16 @@ public sealed class MeetingForm : Form
         _lastActivity = text;
     }
 
-    private void SetStatus(string text) =>
-        _statusLabel.Text = $"{text}　|　已呼叫 {_calls} 次　|　規模：{_scale.ToFriendlyName()}";
+    private void SetStatus(string text) => _statusLabel.Text = text;
 
     private void UpdateControls()
     {
         var started = _setup is not null;
         var idle = !_running;
 
-        _topicBox.Enabled = !started;
-        _projectBox.Enabled = !started;
-        _modeBox.Enabled = !started;
         _startButton.Enabled = !started && idle && _topicBox.Text.Trim().Length > 0;
         _scaleBox.Enabled = idle;
+        _briefScaleBox.Enabled = idle;
 
         _sayBox.Enabled = started && idle;
         _nextRoundButton.Enabled = started && idle;
