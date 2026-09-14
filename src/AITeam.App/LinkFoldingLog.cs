@@ -100,6 +100,20 @@ public sealed class LinkFoldingLog
         ResetCaretStyle();
     }
 
+    /// <summary>記住目前的長度，之後可以把從這裡開始的內容整段換掉。</summary>
+    public int Mark() => _box.TextLength;
+
+    /// <summary>把 Mark() 之後追加的內容整段移除——用來把「正在發言…」換成真正的發言。</summary>
+    public void TruncateTo(int offset)
+    {
+        if (offset < 0 || offset >= _box.TextLength) return;
+
+        _box.Select(offset, _box.TextLength - offset);
+        _box.SelectedText = string.Empty;
+        _links.RemoveAll(link => link.Start >= offset);
+        ResetCaretStyle();
+    }
+
     private void ResetCaretStyle()
     {
         _box.SelectionStart = _box.TextLength;

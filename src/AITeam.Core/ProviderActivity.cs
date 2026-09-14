@@ -26,10 +26,26 @@ public static class ProviderActivity
         if (text.Length == 0) return null;
 
         // 純裝飾用的分隔線、進度條殘骸之類的，不值得佔畫面。
-        if (text.All(c => c is '-' or '=' or '_' or '*' or '.' or '─' or '━')) return null;
+        if (text.All(c => c is '-' or '=' or '_' or '*' or '.' or '~' or '─' or '━')) return null;
         if (text.StartsWith("[2K", StringComparison.Ordinal)) return null;
+        if (IsStackNoise(text)) return null;
 
         return Shorten(text);
+    }
+
+    /// <summary>
+    /// AI 在工作中自己踩到的錯誤（例如 Codex 在 Windows 上用 PowerShell 找不到某個檔），
+    /// 對它來說往往只是試一下、失敗就換個方法，但顯示在「現在在做什麼」那一行會很嚇人，
+    /// 讓人以為整件事失敗了——實際上它後來照樣正常發言。這類噪音一律不顯示。
+    /// </summary>
+    private static bool IsStackNoise(string text)
+    {
+        if (text.StartsWith("+ ", StringComparison.Ordinal)) return true;
+        if (text.StartsWith("At line:", StringComparison.OrdinalIgnoreCase)) return true;
+
+        return text.Contains("FullyQualifiedErrorId", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("CategoryInfo", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Microsoft.PowerShell.Commands", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? DescribeJsonEvent(string line)
