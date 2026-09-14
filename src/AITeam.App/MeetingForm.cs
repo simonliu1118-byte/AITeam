@@ -498,8 +498,8 @@ public sealed class MeetingForm : Form
                 _transcriptEntries,
                 _round,
                 _scale,
-                // 硬逾時：到這裡幾乎確定是卡死了，不是在思考。
-                TimeSpan.FromMinutes(15),
+                // 硬逾時跟著規模走：簡短 5 分鐘、標準 10 分鐘、深入 15 分鐘。
+                _scale.HardTimeout(),
                 ReportActivity,
                 _speakerCts.Token);
 
@@ -510,14 +510,16 @@ public sealed class MeetingForm : Form
         catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
         {
             var reason = _roundCts!.IsCancellationRequested ? "這一輪被你停止了" : "這一輪被你跳過了";
-            var skipped = new MeetingRemark(_round, speaker, $"（{reason}。）", Failed: true);
+            var skipped = new MeetingRemark(
+                _round, speaker, $"（{reason}。）", Failed: true, Elapsed: DateTime.UtcNow - _speakerStartedAt);
             _transcriptEntries.Add(skipped);
             ReplacePlaceholderWith(skipped);
         }
         catch (Exception ex)
         {
             var failed = new MeetingRemark(
-                _round, speaker, $"（這一輪失敗：{TextSummary.OneLine(ex.Message, 300)}）", Failed: true);
+                _round, speaker, $"（這一輪失敗：{TextSummary.OneLine(ex.Message, 300)}）", Failed: true,
+                Elapsed: DateTime.UtcNow - _speakerStartedAt);
             _transcriptEntries.Add(failed);
             ReplacePlaceholderWith(failed);
         }
@@ -646,7 +648,10 @@ public sealed class MeetingForm : Form
 
     private void AppendRemark(MeetingRemark remark)
     {
-        _transcript.AppendHeading($"第 {remark.Round} 輪 · {remark.SpeakerName}{Environment.NewLine}");
+        var spent = remark.Elapsed > TimeSpan.Zero
+            ? $" · 用時 {(int)remark.Elapsed.TotalMinutes:00}:{remark.Elapsed.Seconds:00}"
+            : "";
+        _transcript.AppendHeading($"第 {remark.Round} 輪 · {remark.SpeakerName}{spent}{Environment.NewLine}");
         _transcript.Append(remark.Text + Environment.NewLine);
         // 每則發言後面畫一條線，使用者才知道這個人講完了、下面是另一個人。
         _transcript.AppendDivider();

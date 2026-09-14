@@ -39,6 +39,33 @@ public static class MeetingScaleExtensions
         MeetingScale.Deep => 2000,
         _ => 800
     };
+
+    /// <summary>
+    /// 一位發言者最多能想多久。以前三種規模都給 15 分鐘，結果「簡短 300 字」的題目
+    /// 也可以讓某家 AI 翻半小時的檔——規模說的是這一輪要投入多少，時間上限也該跟著。
+    /// </summary>
+    public static TimeSpan HardTimeout(this MeetingScale scale) => scale switch
+    {
+        MeetingScale.Short => TimeSpan.FromMinutes(5),
+        MeetingScale.Deep => TimeSpan.FromMinutes(15),
+        _ => TimeSpan.FromMinutes(10)
+    };
+
+    /// <summary>
+    /// 要 AI 讀專案之前，先講清楚該讀多少。不講的話它會把整個 repo 掃過一遍，
+    /// 三百字的題目也能花上十分鐘。
+    /// </summary>
+    public static string ExplorationBudget(this MeetingScale scale) => scale switch
+    {
+        MeetingScale.Short =>
+            "Look at a handful of clearly relevant files at most. Do not survey the repository, "
+            + "do not list directories exhaustively, and do not read files that are only tangentially related. "
+            + "If something needs deeper investigation than that, say so instead of doing it.",
+        MeetingScale.Deep =>
+            "You may investigate thoroughly, but stop once you have enough to take a position.",
+        _ =>
+            "Read the files that matter for this question and stop there; do not survey the whole repository."
+    };
 }
 
 public sealed record MeetingSetup(
@@ -53,7 +80,8 @@ public sealed record MeetingRemark(
     ProviderId? Speaker,
     string Text,
     MeetingScale? SuggestedScale = null,
-    bool Failed = false)
+    bool Failed = false,
+    TimeSpan Elapsed = default)
 {
     public string SpeakerName => Speaker?.ToFriendlyName() ?? "你";
 }
@@ -159,9 +187,12 @@ public sealed class MeetingService
         var prompt = BuildPrompt(speaker, setup, transcript, round, scale);
         var workingDirectory = _workingDirectory ?? _runtimeRoot;
 
+        // 記下每位發言者實際花了多久。三家的速度差很多（Antigravity 光啟動就比另外兩家慢），
+        // 把時間寫在發言標題上，慢到不合理的時候使用者一眼就看得出來是哪一家。
+        var started = DateTime.UtcNow;
         var answer = await _providers.AskAsync(speaker, workingDirectory, prompt, timeout, onActivity, cancellationToken);
         var (text, suggested) = ParseRemark(answer);
-        return new MeetingRemark(round, speaker, text, suggested);
+        return new MeetingRemark(round, speaker, text, suggested, Elapsed: DateTime.UtcNow - started);
     }
 
     /// <summary>
@@ -204,8 +235,9 @@ public sealed class MeetingService
 
         var projectSection = setup.Project is null
             ? "This discussion is not tied to a specific project. Answer from general engineering judgement and say so when something depends on details you cannot see."
-            : ChangeTaskService.DescribeProject(setup.Project) + Environment.NewLine +
-              "You have a read-only copy of this project. Open the actual files before making claims about it.";
+            : ChangeTaskService.DescribeProject(setup.Project) + Environment.NewLine
+              + "You have a read-only copy of this project. Open the actual files before making claims about it. "
+              + scale.ExplorationBudget();
 
         var modeSection = setup.Mode == MeetingMode.RoundRobin
             ? """

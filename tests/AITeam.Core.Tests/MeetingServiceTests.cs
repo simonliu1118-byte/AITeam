@@ -139,6 +139,42 @@ public sealed class MeetingServiceTests
     }
 
     [Theory]
+    [InlineData(MeetingScale.Short, 5)]
+    [InlineData(MeetingScale.Standard, 10)]
+    [InlineData(MeetingScale.Deep, 15)]
+    public void HardTimeoutFollowsTheScale_SoAShortRoundCannotRunForHalfAnHour(MeetingScale scale, int minutes)
+    {
+        Assert.Equal(TimeSpan.FromMinutes(minutes), scale.HardTimeout());
+    }
+
+    [Fact]
+    public void ShortRounds_TellTheAiNotToSurveyTheWholeRepository()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Antigravity,
+            new MeetingSetup("小問題", new ProjectEntry { Name = "CYEnvelope" }, MeetingMode.RoundRobin, MeetingScale.Short),
+            Array.Empty<MeetingRemark>(),
+            1,
+            MeetingScale.Short);
+
+        // 不講清楚讀多少，它會把整個 repo 掃一遍，三百字的題目也能花上十分鐘。
+        Assert.Contains("Do not survey the repository", prompt);
+    }
+
+    [Fact]
+    public void DeepRounds_AreAllowedToInvestigateProperly()
+    {
+        var prompt = MeetingService.BuildPrompt(
+            ProviderId.Antigravity,
+            new MeetingSetup("大問題", new ProjectEntry { Name = "CYEnvelope" }, MeetingMode.RoundRobin, MeetingScale.Deep),
+            Array.Empty<MeetingRemark>(),
+            1,
+            MeetingScale.Deep);
+
+        Assert.Contains("investigate thoroughly", prompt);
+    }
+
+    [Theory]
     [InlineData(MeetingScale.Short, 300)]
     [InlineData(MeetingScale.Standard, 800)]
     [InlineData(MeetingScale.Deep, 2000)]
