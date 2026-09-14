@@ -14,6 +14,7 @@ public sealed class MainWindow : Form
     private static readonly Color Accent = Color.FromArgb(43, 108, 176);
 
     private readonly string _runtimeRoot;
+    private readonly IProcessRunner _runner;
     private readonly ProjectRegistryService _projectRegistry;
     private readonly ProviderHealthService _providerHealth;
     private readonly InquiryService _inquiryService;
@@ -35,6 +36,7 @@ public sealed class MainWindow : Form
     private readonly AutoFitLabel _reviewModeLabel = new();
     private readonly Button _projectButton = new();
     private readonly Button _historyButton = new();
+    private readonly Button _meetingButton = new();
     private readonly StatusBadge _modeBadge = new();
     private readonly Label _currentTaskState = new();
     private readonly Label _taskClock = new();
@@ -66,6 +68,7 @@ public sealed class MainWindow : Form
         _runtimeRoot = runtimeRoot;
         _outputLog = new LinkFoldingLog(_outputBox);
         var runner = new ProcessRunner();
+        _runner = runner;
         _projectRegistry = new ProjectRegistryService(runtimeRoot);
         _providerHealth = new ProviderHealthService(runtimeRoot, runner);
         _inquiryService = new InquiryService(runtimeRoot, runner);
@@ -388,11 +391,12 @@ public sealed class MainWindow : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            ColumnCount = 2,
+            ColumnCount = 3,
             Margin = new Padding(0, 0, 0, 8),
             BackColor = AppBackground
         };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.Controls.Add(SectionTitle("AI 狀態", new Padding(2, 7, 0, 0)), 0, 0);
 
@@ -404,7 +408,19 @@ public sealed class MainWindow : Form
         _recheckButton.ForeColor = PrimaryText;
         _recheckButton.FlatAppearance.BorderColor = BorderColor;
         _recheckButton.Click += async (_, _) => await RecheckProvidersAsync();
-        titleRow.Controls.Add(_recheckButton, 1, 0);
+
+        _meetingButton.Text = "發起會議";
+        _meetingButton.AutoSize = false;
+        _meetingButton.Size = new Size(94, 32);
+        _meetingButton.FlatStyle = FlatStyle.Flat;
+        _meetingButton.BackColor = Color.White;
+        _meetingButton.ForeColor = PrimaryText;
+        _meetingButton.FlatAppearance.BorderColor = BorderColor;
+        _meetingButton.Margin = new Padding(0, 0, 8, 0);
+        _meetingButton.Click += (_, _) => OpenMeeting();
+
+        titleRow.Controls.Add(_meetingButton, 1, 0);
+        titleRow.Controls.Add(_recheckButton, 2, 0);
         wrapper.Controls.Add(titleRow, 0, 0);
 
         var card = new RoundedCard
@@ -1211,6 +1227,24 @@ public sealed class MainWindow : Form
         _outputLog.Append(line);
         _taskLog.Append(line);
         _outputLog.ScrollToEnd();
+    }
+
+    /// <summary>
+    /// 開 AI 四方會議。會議跟主畫面的任務完全分開，開著會議也照樣可以送任務。
+    /// </summary>
+    private void OpenMeeting()
+    {
+        var participants = GetProviderCandidates();
+        if (participants.Count == 0)
+        {
+            MessageBox.Show("目前沒有可用的 AI。請先按「重新檢查」。", "AITeam", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // 非強制回應：開著會議的同時還可以在主畫面送任務。
+        var form = new MeetingForm(_runtimeRoot, _runner, _taskHistory, _projects, participants);
+        form.FormClosed += (_, _) => form.Dispose();
+        form.Show(this);
     }
 
     private void OpenTaskHistory()

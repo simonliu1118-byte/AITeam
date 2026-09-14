@@ -32,6 +32,7 @@ public sealed class InquiryService
     // 這一輪任務要把「AI 正在做什麼」送到哪裡；同一時間只會有一個任務在跑。
     private Action<string>? _onActivity;
     private TaskInteraction _interaction = TaskInteraction.None;
+    private readonly ProviderClient _providers;
     private readonly ChangeTaskService _changeTaskService;
     private readonly GitRepositoryService _git;
     private readonly AgentsConfig _agents;
@@ -43,6 +44,8 @@ public sealed class InquiryService
         _changeTaskService = new ChangeTaskService(runtimeRoot, runner);
         _git = new GitRepositoryService(runtimeRoot, runner);
         _agents = new RuntimeConfigService(runtimeRoot).LoadAgentsConfig();
+        // _agents 要先讀好再建 ProviderClient，不然傳進去的是還沒指派的欄位。
+        _providers = new ProviderClient(runtimeRoot, runner, _agents);
     }
 
     public async Task<InquiryResult> RunAsync(
@@ -174,19 +177,6 @@ public sealed class InquiryService
         }
     }
 
-    /// <summary>把某一家 CLI 的原始輸出行，翻成一句可讀的「現在在做什麼」再送出去。</summary>
-    private Action<string>? ActivitySink(ProviderId provider)
-    {
-        var sink = _onActivity;
-        if (sink is null) return null;
-
-        return line =>
-        {
-            var described = ProviderActivity.Describe(provider, line);
-            if (described is not null) sink($"{provider.ToFriendlyName()}：{described}");
-        };
-    }
-
     /// <summary>
     /// 派工前先把使用者排隊中的補充併進提示；選「立刻套用」時中斷這一步、帶著補充重來。
     /// </summary>
@@ -220,109 +210,18 @@ public sealed class InquiryService
         }
     }
 
-    private async Task<string> RunProviderAsync(
+    private Task<string> RunProviderAsync(
         ProviderId provider,
         string workingDirectory,
         string prompt,
-        CancellationToken cancellationToken)
-    {
-        return provider switch
-        {
-            ProviderId.Codex => await RunCodexAsync(workingDirectory, prompt, cancellationToken),
-            ProviderId.Claude => await RunClaudeAsync(workingDirectory, prompt, cancellationToken),
-            ProviderId.Antigravity => await RunAntigravityAsync(workingDirectory, prompt, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(provider))
-        };
-    }
-
-    private async Task<string> RunCodexAsync(string workingDirectory, string prompt, CancellationToken cancellationToken)
-    {
-        var tempDir = Path.Combine(_runtimeRoot, "temp");
-        Directory.CreateDirectory(tempDir);
-        var lastMessage = Path.Combine(tempDir, "codex-inquiry-" + Guid.NewGuid().ToString("N") + ".txt");
-        try
-        {
-            var result = await _runner.RunAsync(
-                _agents.CodexCommand,
-                new[]
-                {
-                    "--sandbox", "read-only",
-                    "--ask-for-approval", "never",
-                    "-c", "model_reasoning_effort=\"medium\"",
-                    "exec",
-                    "--skip-git-repo-check",
-                    "--output-last-message", lastMessage,
-                    "-"
-                },
-                workingDirectory,
-                prompt,
-                TimeSpan.FromMinutes(5),
-                cancellationToken,
-                ActivitySink(ProviderId.Codex));
-            if (result.ExitCode != 0)
-                throw new InvalidOperationException(DescribeFailure(result));
-            if (File.Exists(lastMessage)) return await File.ReadAllTextAsync(lastMessage, cancellationToken);
-            return result.StandardOutput;
-        }
-        finally
-        {
-            try { if (File.Exists(lastMessage)) File.Delete(lastMessage); } catch { }
-        }
-    }
-
-    private async Task<string> RunClaudeAsync(string workingDirectory, string prompt, CancellationToken cancellationToken)
-    {
-        var result = await _runner.RunAsync(
-            _agents.ClaudeCommand,
-            new[]
-            {
-                "-p", prompt,
-                "--output-format", "text",
-                "--max-turns", "20",
-                "--model", "sonnet",
-                "--permission-mode", "plan",
-                "--no-session-persistence"
-            },
+        CancellationToken cancellationToken) =>
+        _providers.AskAsync(
+            provider,
             workingDirectory,
-            null,
-            TimeSpan.FromMinutes(5),
-            cancellationToken,
-            ActivitySink(ProviderId.Claude));
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException(DescribeFailure(result));
-        return result.StandardOutput;
-    }
-
-    private async Task<string> RunAntigravityAsync(string workingDirectory, string prompt, CancellationToken cancellationToken)
-    {
-        var payload = JsonSerializer.Serialize(new
-        {
-            @event = "user",
-            message = new { content = prompt }
-        }) + Environment.NewLine;
-
-        var result = await _runner.RunAsync(
-            _agents.AntigravityCommand,
-            new[]
-            {
-                "--dangerously-skip-permissions",
-                "--input-format", "stream-json",
-                "--output-format", "stream-json",
-                "--print-timeout", "5m"
-            },
-            workingDirectory,
-            payload,
-            TimeSpan.FromMinutes(6),
-            cancellationToken,
-            ActivitySink(ProviderId.Antigravity));
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException(DescribeFailure(result));
-
-        var extracted = AntigravityStream.ExtractAnswer(result.StandardOutput);
-        return string.IsNullOrWhiteSpace(extracted)
-            ? AntigravityStream.DescribeUnparsableOutput(result.StandardOutput)
-            : extracted;
-    }
+            prompt,
+            provider == ProviderId.Antigravity ? TimeSpan.FromMinutes(6) : TimeSpan.FromMinutes(5),
+            _onActivity,
+            cancellationToken);
 
     private static string BuildPrompt(ProjectEntry project, string request) => $"""
 You are the AITeam read-only request gate for project "{project.Name}".
@@ -384,23 +283,6 @@ User request:
         return "未知錯誤";
     }
 
-    /// <summary>
-    /// 描述一次 CLI 失敗。除了錯誤訊息，也帶上結束碼——沒有訊息時（有些 CLI 失敗是靜默的）
-    /// 至少還看得出「它確實跑起來又失敗了」，而不是只看到一句沒有內容的失敗。
-    /// </summary>
-    private static string DescribeFailure(ProcessRunResult result)
-    {
-        var message = FirstUsefulLine(result.StandardError, result.StandardOutput);
-        return message == "未知錯誤"
-            ? $"CLI 以結束碼 {result.ExitCode} 結束，但沒有輸出任何錯誤訊息。"
-            : $"（結束碼 {result.ExitCode}）{message}";
-    }
-
     /// <summary>把多行訊息壓成一行並截長度，避免一則 log 洗掉整個畫面。</summary>
-    internal static string OneLine(string text, int max)
-    {
-        var value = System.Text.RegularExpressions.Regex.Replace(text ?? "", "\\s+", " ").Trim();
-        if (value.Length == 0) return "（沒有錯誤訊息）";
-        return value.Length <= max ? value : value[..max].TrimEnd() + "…";
-    }
+    internal static string OneLine(string text, int max) => TextSummary.OneLine(text, max);
 }
