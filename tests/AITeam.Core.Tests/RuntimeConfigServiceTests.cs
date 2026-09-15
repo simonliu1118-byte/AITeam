@@ -197,17 +197,7 @@ public sealed class RuntimeConfigServiceFileResolutionTests : IDisposable
         var service = new AppPreferencesService(_root);
 
         Assert.Equal(AppPreferences.Default, service.Load());
-        Assert.False(service.Load().HideCliConsole);
-    }
-
-    [Fact]
-    public void PreferencesSurviveASaveAndReload()
-    {
-        var service = new AppPreferencesService(_root);
-
-        service.Save(new AppPreferences(HideCliConsole: true));
-
-        Assert.True(service.Load().HideCliConsole);
+        Assert.Null(service.Load().DecisionWriter);
     }
 
     [Fact]
@@ -225,7 +215,7 @@ public sealed class RuntimeConfigServiceFileResolutionTests : IDisposable
     {
         var service = new AppPreferencesService(_root);
 
-        service.Save(new AppPreferences(HideCliConsole: false, DecisionWriter: ProviderId.Codex));
+        service.Save(new AppPreferences(DecisionWriter: ProviderId.Codex));
 
         Assert.Equal(ProviderId.Codex, service.Load().DecisionWriter);
     }
@@ -239,10 +229,8 @@ public sealed class RuntimeConfigServiceFileResolutionTests : IDisposable
             Path.Combine(dataDir, "preferences.json"),
             """{ "hide_cli_console": true, "decision_writer": "Copilot" }""");
 
-        var preferences = new AppPreferencesService(_root).Load();
-
-        // 認不得的名字（舊版留下來的、或手動亂改的）就當作沒記過，其他設定照樣要讀得到。
-        Assert.Null(preferences.DecisionWriter);
-        Assert.True(preferences.HideCliConsole);
+        // 認不得的名字（舊版留下來的、或手動亂改的）當作沒記過，而且舊版留下來的
+        // hide_cli_console 也不該讓整個檔案讀不起來。
+        Assert.Null(new AppPreferencesService(_root).Load().DecisionWriter);
     }
 }

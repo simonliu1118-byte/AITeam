@@ -100,15 +100,6 @@ public interface IProcessRunner
 
 public sealed class ProcessRunner : IProcessRunner
 {
-    /// <summary>
-    /// 讓 CLI 沿用本程式已經配置好的（隱藏的）主控台，而不是自己開一個新的。
-    /// 預設 false＝維持原本一定能動的作法。這是整個行程共用的狀態（我們自己有沒有隱藏主控台
-    /// 是行程層級的事實），所以放 static；使用者在設定裡切換時即時生效，不用重開程式。
-    /// 沒有隱藏主控台卻把這個打開，反而會讓每個 CLI 自己開一個看得見的視窗，
-    /// 所以只有在確認主控台真的存在且已隱藏之後才可以設成 true。
-    /// </summary>
-    public static bool InheritHiddenConsole { get; set; }
-
     public async Task<ProcessRunResult> RunAsync(
         string fileName,
         IEnumerable<string> arguments,
@@ -125,7 +116,7 @@ public sealed class ProcessRunner : IProcessRunner
         }
 
         var start = DateTimeOffset.UtcNow;
-        var psi = CreateStartInfo(executable, arguments, workingDirectory, standardInput, InheritHiddenConsole);
+        var psi = CreateStartInfo(executable, arguments, workingDirectory, standardInput);
 
         using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -195,20 +186,18 @@ public sealed class ProcessRunner : IProcessRunner
         string executable,
         IEnumerable<string> arguments,
         string workingDirectory,
-        string? standardInput,
-        bool inheritHiddenConsole = false)
+        string? standardInput)
     {
         var psi = new ProcessStartInfo
         {
             FileName = executable,
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
-            // CreateNoWindow 會讓 CLI 拿到一個屬於它自己的新主控台。它自己不會冒出視窗，
-            // 但它再去叫起來的孫程序（例如 Codex 在 Windows 上用 PowerShell 跑工具）
-            // 有機會另外開一個看得見的視窗，那就是畫面上一閃而過的黑框。
-            // 關掉 CreateNoWindow 時，CLI 會沿用我們自己那個已經隱藏起來的主控台，
-            // 孫程序也跟著繼承，理論上就不會再閃。只有在主控台確實已經隱藏時才這樣做。
-            CreateNoWindow = !inheritHiddenConsole,
+            // 這只管得到 CLI 自己：它不會冒出視窗。但 CLI 再去叫起來的孫程序
+            //（三家在 Windows 上跑工具時都會叫 PowerShell）怎麼開視窗，這裡管不到——
+            // 畫面上偶爾一閃而過的黑框就是那個，上層攔不住。V0.27.0 試過幫 CLI 準備一個
+            // 隱藏的主控台讓它們沿用，實測無效，已經移除。
+            CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
