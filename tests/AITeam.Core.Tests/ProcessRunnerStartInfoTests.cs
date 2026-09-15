@@ -50,20 +50,10 @@ public sealed class ProcessRunnerStartInfoTests
     }
 
     [Fact]
-    public void CliGetsItsOwnHiddenWindowByDefault()
+    public void CliNeverGetsAWindowOfItsOwn()
     {
-        // 預設行為＝現在已知穩定的做法。隱藏主控台是實驗性選項，沒有明講就不該生效。
         var psi = ProcessRunner.CreateStartInfo("codex", Array.Empty<string>(), ".", null);
 
         Assert.True(psi.CreateNoWindow);
-    }
-
-    [Fact]
-    public void CliSharesOurHiddenConsole_WhenAskedTo()
-    {
-        // 關掉 CreateNoWindow，CLI（以及它叫起來的孫程序）才會沿用我們自己隱藏起來的主控台。
-        var psi = ProcessRunner.CreateStartInfo("codex", Array.Empty<string>(), ".", null, inheritHiddenConsole: true);
-
-        Assert.False(psi.CreateNoWindow);
     }
 }

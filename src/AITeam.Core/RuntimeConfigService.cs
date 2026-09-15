@@ -144,12 +144,12 @@ public sealed class RuntimeConfigService
 }
 
 /// <summary>
-/// 使用者自己在「設定」視窗裡調的偏好。跟 settings.json／agents.json 不同的是，
-/// 這份是程式自己寫回去的，不是給人手動編輯的。
+/// 程式記下來的使用者偏好（例如上次選了誰整理定案書）。跟 settings.json／agents.json
+/// 不同的是，這份是程式自己寫回去的，不是給人手動編輯的。
 /// </summary>
-public sealed record AppPreferences(bool HideCliConsole, ProviderId? DecisionWriter = null)
+public sealed record AppPreferences(ProviderId? DecisionWriter = null)
 {
-    public static readonly AppPreferences Default = new(false);
+    public static readonly AppPreferences Default = new();
 }
 
 public sealed class AppPreferencesService
@@ -179,7 +179,6 @@ public sealed class AppPreferencesService
         var payload = new
         {
             schema_version = 1,
-            hide_cli_console = preferences.HideCliConsole,
             decision_writer = preferences.DecisionWriter?.ToString()
         };
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
@@ -197,27 +196,18 @@ public sealed class AppPreferencesService
             CommentHandling = JsonCommentHandling.Skip
         });
 
-        var hide = AppPreferences.Default.HideCliConsole;
         var writer = AppPreferences.Default.DecisionWriter;
 
-        if (document.RootElement.ValueKind == JsonValueKind.Object)
+        // 記下來的那家可能已經不在線上，甚至可能是舊版留下來的名字；
+        // 認不得就當作沒記過，讓預設順序去決定。
+        if (document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("decision_writer", out var writerValue) &&
+            writerValue.ValueKind == JsonValueKind.String &&
+            Enum.TryParse<ProviderId>(writerValue.GetString(), ignoreCase: true, out var parsed))
         {
-            if (document.RootElement.TryGetProperty("hide_cli_console", out var value) &&
-                (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False))
-            {
-                hide = value.GetBoolean();
-            }
-
-            // 記下來的那家可能已經不在線上，甚至可能是舊版留下來的名字；
-            // 認不得就當作沒記過，讓預設順序去決定。
-            if (document.RootElement.TryGetProperty("decision_writer", out var writerValue) &&
-                writerValue.ValueKind == JsonValueKind.String &&
-                Enum.TryParse<ProviderId>(writerValue.GetString(), ignoreCase: true, out var parsed))
-            {
-                writer = parsed;
-            }
+            writer = parsed;
         }
 
-        return new AppPreferences(hide, writer);
+        return new AppPreferences(writer);
     }
 }
