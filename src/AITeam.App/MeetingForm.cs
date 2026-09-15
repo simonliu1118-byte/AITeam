@@ -44,6 +44,7 @@ public sealed class MeetingForm : Form
     private readonly Button _decideButton = new();
     private readonly Button _handoffButton = new();
     private readonly Button _endButton = new();
+    private readonly Button _interjectButton = new();
     private readonly Button _skipSpeakerButton = new();
     private readonly Button _stopRoundButton = new();
     private readonly System.Windows.Forms.Timer _softTimer = new() { Interval = 1000 };
@@ -60,6 +61,8 @@ public sealed class MeetingForm : Form
     private CancellationTokenSource? _speakerCts;
     private CancellationTokenSource? _roundCts;
     private ProviderId? _currentSpeaker;
+    // 使用者按了「立刻插話」：砍掉目前這位講到一半的內容，帶著你的話請同一位重講。
+    private bool _interjecting;
     // 「正在發言…」那段在逐字稿裡的起點，收到真正的發言後從這裡整段換掉。
     private int _pendingMark = -1;
     private string _lastActivity = "";
@@ -337,26 +340,34 @@ public sealed class MeetingForm : Form
         var row = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 3 };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-        row.Controls.Add(MakeFieldLabel("你的發言（選填）"), 0, 0);
+        row.Controls.Add(MakeFieldLabel("你的發言（隨時可以打字；下一位開口前會自動插進去）"), 0, 0);
 
         _sayBox.Dock = DockStyle.Top;
         _sayBox.Multiline = true;
         _sayBox.Height = 56;
         _sayBox.ScrollBars = ScrollBars.Vertical;
         _sayBox.Margin = new Padding(0, 4, 0, 8);
+        // 有人在發言的時候也照樣可以打字——這就是「插話」的前提。
+        _sayBox.TextChanged += (_, _) => UpdateInterjectButton();
         row.Controls.Add(_sayBox, 0, 1);
 
         // 一列六顆按鈕，但同一時間只有一組用得上：有人在發言時只剩「跳過這家／停止這一輪」，
         // 輪到使用者時只剩另外四顆。用顯示／隱藏切換，不必再多一條控制列。
-        var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 8 };
+        var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 9 };
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (var i = 0; i < 7; i++) buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (var i = 0; i < 8; i++) buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        ConfigureSecondaryButton(_interjectButton, "立刻插話", 100);
+        _interjectButton.Margin = new Padding(0, 0, 8, 0);
+        _interjectButton.Visible = false;
+        _interjectButton.Click += (_, _) => InterjectNow();
+        buttons.Controls.Add(_interjectButton, 1, 0);
 
         ConfigureSecondaryButton(_skipSpeakerButton, "跳過這家", 100);
         _skipSpeakerButton.Margin = new Padding(0, 0, 8, 0);
         _skipSpeakerButton.Visible = false;
         _skipSpeakerButton.Click += (_, _) => SkipCurrentSpeaker();
-        buttons.Controls.Add(_skipSpeakerButton, 1, 0);
+        buttons.Controls.Add(_skipSpeakerButton, 2, 0);
 
         ConfigureSecondaryButton(_stopRoundButton, "停止這一輪", 110);
         _stopRoundButton.Margin = new Padding(0, 0, 8, 0);
@@ -364,31 +375,31 @@ public sealed class MeetingForm : Form
         _stopRoundButton.FlatAppearance.BorderColor = Color.FromArgb(227, 195, 195);
         _stopRoundButton.Visible = false;
         _stopRoundButton.Click += (_, _) => StopRound();
-        buttons.Controls.Add(_stopRoundButton, 2, 0);
+        buttons.Controls.Add(_stopRoundButton, 3, 0);
 
         ConfigureSecondaryButton(_endButton, "結束會議", 100);
         _endButton.Margin = new Padding(0, 0, 8, 0);
         _endButton.Click += async (_, _) => await EndMeetingAsync(TaskOutcome.Completed);
-        buttons.Controls.Add(_endButton, 3, 0);
+        buttons.Controls.Add(_endButton, 4, 0);
 
         ConfigureSecondaryButton(_decideButton, "直接定案", 100);
         _decideButton.Margin = new Padding(0, 0, 8, 0);
         _decideButton.Click += async (_, _) => await DecideAsync();
-        buttons.Controls.Add(_decideButton, 4, 0);
+        buttons.Controls.Add(_decideButton, 5, 0);
 
         ConfigureSecondaryButton(_handoffButton, "送去執行", 100);
         _handoffButton.Margin = new Padding(0, 0, 8, 0);
         _handoffButton.Click += async (_, _) => await HandOffAsync();
-        buttons.Controls.Add(_handoffButton, 5, 0);
+        buttons.Controls.Add(_handoffButton, 6, 0);
 
         ConfigureSecondaryButton(_concludeButton, "請 AI 收斂結論", 130);
         _concludeButton.Margin = new Padding(0, 0, 8, 0);
         _concludeButton.Click += async (_, _) => await RunRoundAsync(concluding: true);
-        buttons.Controls.Add(_concludeButton, 6, 0);
+        buttons.Controls.Add(_concludeButton, 7, 0);
 
         ConfigurePrimaryButton(_nextRoundButton, "繼續下一輪", 130);
         _nextRoundButton.Click += async (_, _) => await RunRoundAsync(concluding: false);
-        buttons.Controls.Add(_nextRoundButton, 7, 0);
+        buttons.Controls.Add(_nextRoundButton, 8, 0);
 
         row.Controls.Add(buttons, 0, 2);
         return row;
@@ -459,7 +470,13 @@ public sealed class MeetingForm : Form
                     AppendSystemLine("這一輪已停止，剩下的 AI 不再發言。");
                     return;
                 }
-                await AskOneAsync(speaker, concluding);
+
+                // 上一位在講的時候你打的字，趕在下一位開口之前插進逐字稿，
+                // 這樣它一開口看到的就已經包含你的話了。
+                FlushPendingRemark();
+
+                // 你按「立刻插話」時會回 true：同一位帶著你的話重講一次。
+                while (await AskOneAsync(speaker, concluding)) { }
             }
         }
         finally
@@ -479,6 +496,14 @@ public sealed class MeetingForm : Form
                 : said + Environment.NewLine + "另外：請把目前的討論收斂成一個明確的結論與建議做法。";
         }
 
+        AddUserRemark(said);
+    }
+
+    /// <summary>把留言板上還沒送出的字當成一則使用者發言，插進逐字稿。</summary>
+    private void FlushPendingRemark() => AddUserRemark(_sayBox.Text.Trim());
+
+    private void AddUserRemark(string said)
+    {
         if (said.Length == 0) return;
 
         var remark = new MeetingRemark(_round, null, said);
@@ -487,7 +512,10 @@ public sealed class MeetingForm : Form
         _sayBox.Clear();
     }
 
-    private async Task AskOneAsync(ProviderId speaker, bool concluding)
+    /// <summary>
+    /// 請一位 AI 發言。回傳 true 代表使用者中途插話、這一位要帶著新的話重講一次。
+    /// </summary>
+    private async Task<bool> AskOneAsync(ProviderId speaker, bool concluding)
     {
         _speakerCts?.Dispose();
         _speakerCts = CancellationTokenSource.CreateLinkedTokenSource(_roundCts!.Token);
@@ -519,6 +547,17 @@ public sealed class MeetingForm : Form
             ReplacePlaceholderWith(remark);
             if (remark.SuggestedScale is { } suggested && suggested != _scale) OfferScaleChange(speaker, suggested);
         }
+        catch (OperationCanceledException) when (_interjecting && !_roundCts!.IsCancellationRequested)
+        {
+            // 插話：它講到一半的內容不留（沒看過你的話，留著只會互相矛盾），
+            // 但要寫一行說明，不然畫面上會莫名其妙少一段。
+            _interjecting = false;
+            if (_pendingMark >= 0) _transcript.TruncateTo(_pendingMark);
+            _pendingMark = -1;
+            AppendSystemLine($"你在 {speaker.ToFriendlyName()} 講到一半時插話，它會帶著你的話重講一次。");
+            FlushPendingRemark();
+            return true;
+        }
         catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
         {
             var reason = _roundCts!.IsCancellationRequested ? "這一輪被你停止了" : "這一輪被你跳過了";
@@ -537,10 +576,13 @@ public sealed class MeetingForm : Form
         }
         finally
         {
+            _interjecting = false;
             _softTimer.Stop();
             _currentSpeaker = null;
             _pendingMark = -1;
         }
+
+        return false;
     }
 
 
@@ -596,6 +638,18 @@ public sealed class MeetingForm : Form
         _transcript.Append($"正在發言…{Environment.NewLine}");
         _transcript.ScrollToEnd();
         SetStatus($"第 {_round} 輪 · {speaker.ToFriendlyName()} 發言中 00:00");
+    }
+
+    /// <summary>
+    /// 中途插話：把目前這位砍掉，讓它帶著你剛打的話重講。
+    /// 三家 CLI 的提示都是一次性給進去的，沒有辦法在它已經開始想之後再「補一句進它耳朵」，
+    /// 所以真正做得到、而且三家都一樣的做法就是重問一次。
+    /// </summary>
+    private void InterjectNow()
+    {
+        if (_sayBox.Text.Trim().Length == 0) return;
+        _interjecting = true;
+        try { _speakerCts?.Cancel(); } catch (ObjectDisposedException) { }
     }
 
     private void SkipCurrentSpeaker()
@@ -731,7 +785,8 @@ public sealed class MeetingForm : Form
         _scaleBox.Enabled = idle;
         _briefScaleBox.Enabled = idle;
 
-        _sayBox.Enabled = started && idle;
+        // 留言板永遠可以打字——會議開始之後，不管誰在發言你都能先把話打好。
+        _sayBox.Enabled = started;
         _nextRoundButton.Visible = idle;
         _concludeButton.Visible = idle;
         _decideButton.Visible = idle;
@@ -743,13 +798,19 @@ public sealed class MeetingForm : Form
         // 至少要有一位 AI 真的講過話，才有結論可以送去執行。
         _handoffButton.Enabled = started && _transcriptEntries.Any(r => r.Speaker is not null && !r.Failed);
 
-        // 有人在發言時，能做的只有跳過它或停掉這一輪。
+        // 有人在發言時，能做的只有插話、跳過它、或停掉這一輪。
+        _interjectButton.Visible = !idle;
         _skipSpeakerButton.Visible = !idle;
         _stopRoundButton.Visible = !idle;
+        UpdateInterjectButton();
 
         if (!started) SetStatus("尚未開始");
         else if (idle) SetStatus($"第 {_round} 輪結束，輪到你");
     }
+
+    /// <summary>留言板是空的就沒有話可以插，按鈕要跟著灰掉。</summary>
+    private void UpdateInterjectButton() =>
+        _interjectButton.Enabled = _running && _sayBox.Text.Trim().Length > 0;
 
     private async void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
