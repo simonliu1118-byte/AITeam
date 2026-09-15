@@ -68,11 +68,43 @@ public static class MeetingScaleExtensions
     };
 }
 
+/// <summary>會議交出去的東西到底是什麼。這會決定我們怎麼跟 Planner 介紹它。</summary>
+public enum MeetingConclusionKind
+{
+    /// <summary>沒有收斂過，只是把每位參與者最後的立場並排起來。彼此可能互相矛盾。</summary>
+    UnconvergedSummary,
+
+    /// <summary>某一家 AI 讀完整場會議之後寫出來的定案書。</summary>
+    Decision
+}
+
 /// <summary>
 /// 一場會議談完之後要交給修改管線的東西。會議只負責「談出結論」，
 /// 要不要做、對哪個專案做，由使用者在交接時決定。
 /// </summary>
-public sealed record MeetingConclusion(string Topic, string? ProjectName, string Text);
+public sealed record MeetingConclusion(
+    string Topic,
+    string? ProjectName,
+    string Text,
+    MeetingConclusionKind Kind = MeetingConclusionKind.UnconvergedSummary,
+    ProviderId? Writer = null)
+{
+    /// <summary>
+    /// 交給 Planner 時掛在需求後面的那一段背景。措辭一定要跟實情一致：
+    /// 把「三個人各自的立場」介紹成「使用者確認過的定案」，Planner 就會照著一個
+    /// 根本沒定案的東西動手改程式——它不會問，因為我們告訴它不用問。
+    /// </summary>
+    public string ComposeBackground() => Kind == MeetingConclusionKind.Decision
+        ? "以下是先前 AI 四方會議的定案書"
+          + (Writer is { } writer ? $"（由 {writer.ToFriendlyName()} 整理）" : "")
+          + "，已經由使用者確認，請當作背景採用，不要重新討論這些已經決定好的事。"
+          + "但「還沒決定的事」那一段是尚未定案的，遇到那些問題要先問使用者，不要自己決定。"
+          + Environment.NewLine + Text
+        : "以下是先前 AI 四方會議的討論摘要。這場會議沒有收斂出定案，下面只是每位參與者"
+          + "最後的立場，彼此可能互相矛盾。請把它當成參考背景，不要當成已經決定好的事；"
+          + "真正要做什麼以使用者的需求為準，有疑問就先問，不要自己挑一個立場執行。"
+          + Environment.NewLine + Text;
+}
 
 public sealed record MeetingSetup(
     string Topic,
@@ -199,6 +231,81 @@ public sealed class MeetingService
         var answer = await _providers.AskAsync(speaker, workingDirectory, prompt, timeout, onActivity, cancellationToken);
         var (text, suggested) = ParseRemark(answer);
         return new MeetingRemark(round, speaker, text, suggested, Elapsed: DateTime.UtcNow - started);
+    }
+
+    /// <summary>
+    /// 請一家 AI 把整場會議寫成一份定案書。
+    ///
+    /// 為什麼要有這一步：以前交給修改管線的是 <see cref="Summarise"/> 湊出來的東西——
+    /// 每家最後一則發言壓成一行、砍到 220 字並排。三家意見不同時，那是三段互相打架的話，
+    /// 沒有任何一句說「所以我們決定怎麼做」，而且真正的做法細節通常就在被砍掉的後半。
+    ///
+    /// 只叫一家寫（不是三家各寫一份），因為定案書要的就是「一份」。
+    /// </summary>
+    public async Task<string> DraftDecisionAsync(
+        ProviderId writer,
+        MeetingSetup setup,
+        IReadOnlyList<MeetingRemark> transcript,
+        TimeSpan timeout,
+        Action<string>? onActivity,
+        CancellationToken cancellationToken)
+    {
+        var prompt = BuildDecisionPrompt(writer, setup, transcript);
+        var workingDirectory = _workingDirectory ?? _runtimeRoot;
+        var answer = await _providers.AskAsync(writer, workingDirectory, prompt, timeout, onActivity, cancellationToken);
+        return answer.Trim();
+    }
+
+    /// <summary>定案書的五個欄位。順序固定，因為使用者要照這個順序讀它。</summary>
+    internal static readonly string[] DecisionSections =
+    {
+        "要做什麼：",
+        "為什麼這樣做：",
+        "具體做法：",
+        "明確不做／已經排除的選項：",
+        "還沒決定的事："
+    };
+
+    internal static string BuildDecisionPrompt(
+        ProviderId writer,
+        MeetingSetup setup,
+        IReadOnlyList<MeetingRemark> transcript)
+    {
+        var usable = transcript.Where(r => !r.Failed).ToList();
+        var history = usable.Count == 0
+            ? "（還沒有任何發言。）"
+            : string.Join(
+                Environment.NewLine + Environment.NewLine,
+                usable.Select(r => $"【第 {r.Round} 輪 · {r.SpeakerName}】{Environment.NewLine}{r.Text}"));
+
+        var sections = string.Join(Environment.NewLine, DecisionSections);
+
+        return $"""
+You are acting as the MINUTE-TAKER for an AITeam round-table discussion, in the seat of "{writer.ToFriendlyName()}". Your job is to turn the transcript below into one decision document.
+
+You are NOT defending your own earlier position. You took part in this discussion, so be deliberate about this: where participants disagreed, do not quietly pick your own side. Either the transcript shows the disagreement was settled — then say what was settled and why — or it was not, and it belongs under the last heading as still open.
+
+Use ONLY what is in the transcript. Do not open or read any project files, do not survey the repository, and do not add anything the participants did not actually say. If something important was never decided, that is a finding, not a gap for you to fill in.
+
+This document will be handed to another AI that modifies real code. Anything you write under the first four headings will be treated as already decided and will be acted on without further discussion — so put anything that is not actually settled under the last heading instead.
+
+Topic:
+{setup.Topic}
+
+Transcript:
+{history}
+
+Write the document in Traditional Chinese (繁體中文), using exactly these five headings, in this order, each on its own line with its content underneath:
+
+{sections}
+
+Rules for the content:
+- Be concrete and specific. "改善效能" is useless; "把 X 的查詢改成批次，一次抓 100 筆" is useful.
+- Do not write a preamble, a greeting, or a closing remark. Start with the first heading.
+- Do not quote the transcript at length; write the conclusion, not a replay of the discussion.
+- If a heading genuinely has nothing under it, write 「（無）」 under it rather than deleting the heading.
+- Under the last heading, also list anything the participants disagreed about and never resolved, naming who wanted what.
+""";
     }
 
     /// <summary>

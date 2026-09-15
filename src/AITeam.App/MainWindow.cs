@@ -909,10 +909,9 @@ public sealed class MainWindow : Form
     {
         if (string.IsNullOrWhiteSpace(background)) return request;
 
-        return request + Environment.NewLine + Environment.NewLine
-            + "以下是先前 AI 四方會議談出來的結論，已經由使用者確認，請當作背景採用，"
-            + "不要重新討論這些已經決定好的事：" + Environment.NewLine
-            + background;
+        // 背景怎麼介紹自己，由 MeetingConclusion.ComposeBackground 決定：
+        // 收斂過的定案書跟沒收斂的討論摘要，說法必須不一樣，不然就是在騙 Planner。
+        return request + Environment.NewLine + Environment.NewLine + background;
     }
 
     /// <summary>
@@ -1348,7 +1347,9 @@ public sealed class MainWindow : Form
         if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Project is null) return;
 
         SelectProject(dialog.Project.Name);
-        await HandleSendAsync(dialog.Request, dialog.Conclusion);
+        // 送出去的是使用者在交接視窗裡看過、也可能改過的那一份，不是會議自己產生的原文。
+        var agreed = conclusion with { Text = dialog.Conclusion };
+        await HandleSendAsync(dialog.Request, agreed.ComposeBackground());
     }
 
     private void SelectProject(string name)

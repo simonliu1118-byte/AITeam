@@ -63,6 +63,11 @@ public sealed class MeetingForm : Form
     private ProviderId? _currentSpeaker;
     // 使用者按了「立刻插話」：砍掉目前這位講到一半的內容，帶著你的話請同一位重講。
     private bool _interjecting;
+    // 正在請某一家把會議寫成定案書。這期間只留「停止」，插話跟跳過都沒有意義。
+    private bool _drafting;
+    private CancellationTokenSource? _draftCts;
+    // 寫出來的定案書。歷史紀錄要存這一份，不是程式湊出來的立場並排。
+    private MeetingConclusion? _decision;
     // 「正在發言…」那段在逐字稿裡的起點，收到真正的發言後從這裡整段換掉。
     private int _pendingMark = -1;
     private string _lastActivity = "";
@@ -654,12 +659,18 @@ public sealed class MeetingForm : Form
 
     private void SkipCurrentSpeaker()
     {
+        if (_drafting) return;
         try { _speakerCts?.Cancel(); } catch (ObjectDisposedException) { }
     }
 
     /// <summary>停掉這一輪：目前這家中斷，後面排隊的也不會再發言，但會議本身還在。</summary>
     private void StopRound()
     {
+        if (_drafting)
+        {
+            try { _draftCts?.Cancel(); } catch (ObjectDisposedException) { }
+            return;
+        }
         try { _roundCts?.Cancel(); } catch (ObjectDisposedException) { }
     }
 
@@ -672,15 +683,20 @@ public sealed class MeetingForm : Form
     /// <summary>把這場會議談出來的東西交給主畫面，由它決定要對哪個專案執行。</summary>
     private async Task HandOffAsync()
     {
-        if (_setup is null) return;
+        if (_setup is null || _running) return;
 
         // 使用者在輸入框裡打的最後一段話也算結論的一部分，不要漏掉。
         RecordUserRemark(concluding: false);
 
-        var conclusion = new MeetingConclusion(
-            _setup.Topic,
-            _setup.Project?.Name,
-            MeetingService.Summarise(_transcriptEntries, _round, _calls));
+        using var gate = new DecisionGateDialog(_participants);
+        if (gate.ShowDialog(this) != DialogResult.OK || gate.Choice == DecisionGateChoice.Cancel) return;
+
+        var conclusion = gate.Choice == DecisionGateChoice.Draft
+            ? await DraftDecisionAsync(gate.Writer)
+            : UnconvergedConclusion();
+
+        // 定案書寫失敗而且使用者不想直接送，就留在會議裡，不要把會議收掉。
+        if (conclusion is null) return;
 
         SaveHistory(TaskOutcome.Completed);
         await _meetings.CleanupAsync();
@@ -688,6 +704,77 @@ public sealed class MeetingForm : Form
 
         SendToPipelineRequested?.Invoke(this, conclusion);
         Close();
+    }
+
+    private MeetingConclusion UnconvergedConclusion() => new(
+        _setup!.Topic,
+        _setup.Project?.Name,
+        MeetingService.Summarise(_transcriptEntries, _round, _calls),
+        MeetingConclusionKind.UnconvergedSummary);
+
+    /// <summary>
+    /// 請一家 AI 把整場會議寫成定案書。失敗的話問使用者要不要照舊直接送，
+    /// 回傳 null 代表他選擇留在會議裡。
+    /// </summary>
+    private async Task<MeetingConclusion?> DraftDecisionAsync(ProviderId writer)
+    {
+        _drafting = true;
+        _running = true;
+        _draftCts?.Dispose();
+        _draftCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        UpdateControls();
+        SetStatus($"{writer.ToFriendlyName()} 正在整理定案書…");
+        _transcript.AppendDivider();
+        AppendSystemLine($"請 {writer.ToFriendlyName()} 把這場會議整理成定案書…");
+
+        try
+        {
+            _calls++;
+            UpdateBrief();
+            // 定案書只讀逐字稿、不讀專案檔，所以不需要跟發言一樣寬的時間。
+            var text = await _meetings.DraftDecisionAsync(
+                writer, _setup!, _transcriptEntries, TimeSpan.FromMinutes(5), ReportActivity, _draftCts.Token);
+
+            if (text.Length == 0) throw new InvalidOperationException("它沒有寫出任何內容。");
+
+            _transcript.AppendHeading($"定案書（由 {writer.ToFriendlyName()} 整理）{Environment.NewLine}");
+            _transcript.Append(TextSummary.CompactParagraphs(text) + Environment.NewLine);
+            _transcript.AppendDivider();
+            _transcript.ScrollToEnd();
+
+            _decision = new MeetingConclusion(
+                _setup!.Topic, _setup.Project?.Name, text, MeetingConclusionKind.Decision, writer);
+            return _decision;
+        }
+        catch (Exception ex)
+        {
+            // 會議視窗正在關掉，不要再彈視窗問他問題。
+            if (ex is OperationCanceledException && _lifetime.IsCancellationRequested) return null;
+
+            var reason = ex is OperationCanceledException
+                ? "定案書被你停掉了。"
+                : $"定案書寫失敗：{TextSummary.OneLine(ex.Message, 200)}";
+            AppendSystemLine(reason);
+
+            var answer = MessageBox.Show(
+                this,
+                reason + Environment.NewLine + Environment.NewLine
+                + "要改成直接送出目前的討論摘要嗎？（接手的 AI 會被明確告知這場會議沒有收斂，"
+                + "不會把它當成已經決定好的事。）"
+                + Environment.NewLine + Environment.NewLine
+                + "選「否」就留在會議裡，你可以換一家再試一次。",
+                "AITeam",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            return answer == DialogResult.Yes ? UnconvergedConclusion() : null;
+        }
+        finally
+        {
+            _drafting = false;
+            _running = false;
+            UpdateControls();
+        }
     }
 
     private async Task EndMeetingAsync(TaskOutcome outcome)
@@ -715,6 +802,13 @@ public sealed class MeetingForm : Form
             Environment.NewLine + Environment.NewLine,
             _transcriptEntries.Select(r => $"【第 {r.Round} 輪 · {r.SpeakerName}】{Environment.NewLine}{r.Text}"));
 
+        if (_decision is { } decision)
+        {
+            var writer = decision.Writer?.ToFriendlyName() ?? "AI";
+            transcript += Environment.NewLine + Environment.NewLine
+                + $"【定案書 · 由 {writer} 整理】{Environment.NewLine}{decision.Text}";
+        }
+
         _history.Save(
             new TaskHistoryEntry
             {
@@ -726,7 +820,8 @@ public sealed class MeetingForm : Form
                 Outcome = outcome,
                 StartedAt = _startedAt,
                 FinishedAt = DateTime.Now,
-                Result = MeetingService.Summarise(_transcriptEntries, _round, _calls)
+                // 有定案書就存定案書：那才是這場會議真正的結果。
+                Result = _decision?.Text ?? MeetingService.Summarise(_transcriptEntries, _round, _calls)
             },
             transcript);
     }
@@ -799,8 +894,9 @@ public sealed class MeetingForm : Form
         _handoffButton.Enabled = started && _transcriptEntries.Any(r => r.Speaker is not null && !r.Failed);
 
         // 有人在發言時，能做的只有插話、跳過它、或停掉這一輪。
-        _interjectButton.Visible = !idle;
-        _skipSpeakerButton.Visible = !idle;
+        // 在寫定案書的時候只剩「停止」——沒有人在發言，插話跟跳過都沒有對象。
+        _interjectButton.Visible = !idle && !_drafting;
+        _skipSpeakerButton.Visible = !idle && !_drafting;
         _stopRoundButton.Visible = !idle;
         UpdateInterjectButton();
 
