@@ -42,6 +42,7 @@ public sealed class MeetingForm : Form
     private readonly Button _nextRoundButton = new();
     private readonly Button _concludeButton = new();
     private readonly Button _decideButton = new();
+    private readonly Button _handoffButton = new();
     private readonly Button _endButton = new();
     private readonly Button _skipSpeakerButton = new();
     private readonly Button _stopRoundButton = new();
@@ -64,6 +65,12 @@ public sealed class MeetingForm : Form
     private string _lastActivity = "";
     private readonly CancellationTokenSource _lifetime = new();
     private readonly DateTime _startedAt = DateTime.Now;
+
+    /// <summary>
+    /// 使用者按「送去執行」時發出。會議只負責談出結論；要對哪個專案做、實際送出什麼需求，
+    /// 由主畫面接手處理（它才有專案登錄與新增專案的能力）。
+    /// </summary>
+    public event EventHandler<MeetingConclusion>? SendToPipelineRequested;
 
     public MeetingForm(
         string runtimeRoot,
@@ -341,9 +348,9 @@ public sealed class MeetingForm : Form
 
         // 一列六顆按鈕，但同一時間只有一組用得上：有人在發言時只剩「跳過這家／停止這一輪」，
         // 輪到使用者時只剩另外四顆。用顯示／隱藏切換，不必再多一條控制列。
-        var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 7 };
+        var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 8 };
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (var i = 0; i < 6; i++) buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (var i = 0; i < 7; i++) buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         ConfigureSecondaryButton(_skipSpeakerButton, "跳過這家", 100);
         _skipSpeakerButton.Margin = new Padding(0, 0, 8, 0);
@@ -369,14 +376,19 @@ public sealed class MeetingForm : Form
         _decideButton.Click += async (_, _) => await DecideAsync();
         buttons.Controls.Add(_decideButton, 4, 0);
 
+        ConfigureSecondaryButton(_handoffButton, "送去執行", 100);
+        _handoffButton.Margin = new Padding(0, 0, 8, 0);
+        _handoffButton.Click += async (_, _) => await HandOffAsync();
+        buttons.Controls.Add(_handoffButton, 5, 0);
+
         ConfigureSecondaryButton(_concludeButton, "請 AI 收斂結論", 130);
         _concludeButton.Margin = new Padding(0, 0, 8, 0);
         _concludeButton.Click += async (_, _) => await RunRoundAsync(concluding: true);
-        buttons.Controls.Add(_concludeButton, 5, 0);
+        buttons.Controls.Add(_concludeButton, 6, 0);
 
         ConfigurePrimaryButton(_nextRoundButton, "繼續下一輪", 130);
         _nextRoundButton.Click += async (_, _) => await RunRoundAsync(concluding: false);
-        buttons.Controls.Add(_nextRoundButton, 6, 0);
+        buttons.Controls.Add(_nextRoundButton, 7, 0);
 
         row.Controls.Add(buttons, 0, 2);
         return row;
@@ -603,6 +615,27 @@ public sealed class MeetingForm : Form
         await EndMeetingAsync(TaskOutcome.Completed);
     }
 
+    /// <summary>把這場會議談出來的東西交給主畫面，由它決定要對哪個專案執行。</summary>
+    private async Task HandOffAsync()
+    {
+        if (_setup is null) return;
+
+        // 使用者在輸入框裡打的最後一段話也算結論的一部分，不要漏掉。
+        RecordUserRemark(concluding: false);
+
+        var conclusion = new MeetingConclusion(
+            _setup.Topic,
+            _setup.Project?.Name,
+            MeetingService.Summarise(_transcriptEntries, _round, _calls));
+
+        SaveHistory(TaskOutcome.Completed);
+        await _meetings.CleanupAsync();
+        _setup = null;
+
+        SendToPipelineRequested?.Invoke(this, conclusion);
+        Close();
+    }
+
     private async Task EndMeetingAsync(TaskOutcome outcome)
     {
         if (_setup is null) { Close(); return; }
@@ -702,10 +735,13 @@ public sealed class MeetingForm : Form
         _nextRoundButton.Visible = idle;
         _concludeButton.Visible = idle;
         _decideButton.Visible = idle;
+        _handoffButton.Visible = idle;
         _endButton.Visible = idle;
         _nextRoundButton.Enabled = started;
         _concludeButton.Enabled = started && _round > 0;
         _decideButton.Enabled = started && _round > 0;
+        // 至少要有一位 AI 真的講過話，才有結論可以送去執行。
+        _handoffButton.Enabled = started && _transcriptEntries.Any(r => r.Speaker is not null && !r.Failed);
 
         // 有人在發言時，能做的只有跳過它或停掉這一輪。
         _skipSpeakerButton.Visible = !idle;
