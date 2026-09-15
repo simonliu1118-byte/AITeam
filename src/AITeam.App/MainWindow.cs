@@ -19,6 +19,7 @@ public sealed class MainWindow : Form
     private readonly ProviderHealthService _providerHealth;
     private readonly InquiryService _inquiryService;
     private readonly TaskHistoryService _taskHistory;
+    private readonly AppPreferencesService _preferencesService;
     private readonly CancellationTokenSource _lifetimeCts = new();
 
     private readonly ComboBox _projectBox = new();
@@ -36,6 +37,7 @@ public sealed class MainWindow : Form
     private readonly Button _projectButton = new();
     private readonly Button _historyButton = new();
     private readonly Button _meetingButton = new();
+    private readonly Button _settingsButton = new();
     private readonly StatusBadge _modeBadge = new();
     private readonly StatusBadge _reviewBadge = new();
     private readonly ToolTip _reviewTip = new() { InitialDelay = 250, ShowAlways = true };
@@ -74,6 +76,7 @@ public sealed class MainWindow : Form
         _providerHealth = new ProviderHealthService(runtimeRoot, runner);
         _inquiryService = new InquiryService(runtimeRoot, runner);
         _taskHistory = new TaskHistoryService(runtimeRoot);
+        _preferencesService = new AppPreferencesService(runtimeRoot);
 
         Text = "AITeam";
         StartPosition = FormStartPosition.CenterScreen;
@@ -188,13 +191,30 @@ public sealed class MainWindow : Form
         _reviewBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _reviewBadge.BackColor = CardBackground;
 
+        _settingsButton.Text = "設定";
+        _settingsButton.AutoSize = false;
+        _settingsButton.Size = new Size(72, 30);
+        _settingsButton.FlatStyle = FlatStyle.Flat;
+        _settingsButton.FlatAppearance.BorderColor = BorderColor;
+        _settingsButton.BackColor = CardBackground;
+        _settingsButton.ForeColor = SecondaryText;
+        _settingsButton.Font = new Font("Microsoft JhengHei UI", 9.5F);
+        _settingsButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _settingsButton.Cursor = Cursors.Hand;
+        _settingsButton.Click += (_, _) => OpenSettings();
+
         header.Controls.Add(title);
         header.Controls.Add(version);
         header.Controls.Add(_meetingButton);
+        header.Controls.Add(_settingsButton);
         header.Controls.Add(_reviewBadge);
 
-        void PositionBadge() =>
-            _reviewBadge.Location = new Point(Math.Max(0, header.ClientSize.Width - _reviewBadge.Width - 22), 20);
+        void PositionBadge()
+        {
+            var badgeLeft = Math.Max(0, header.ClientSize.Width - _reviewBadge.Width - 22);
+            _reviewBadge.Location = new Point(badgeLeft, 20);
+            _settingsButton.Location = new Point(Math.Max(0, badgeLeft - _settingsButton.Width - 10), 20);
+        }
 
         // 徽章寬度會隨文字變動，所以寬度變了也要重新靠右。
         header.Resize += (_, _) => PositionBadge();
@@ -1274,6 +1294,12 @@ public sealed class MainWindow : Form
         _outputLog.Append(line);
         _taskLog.Append(line);
         _outputLog.ScrollToEnd();
+    }
+
+    private void OpenSettings()
+    {
+        using var form = new SettingsForm(_preferencesService, _preferencesService.Load());
+        form.ShowDialog(this);
     }
 
     /// <summary>

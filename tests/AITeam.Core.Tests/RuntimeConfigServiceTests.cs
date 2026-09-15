@@ -190,4 +190,33 @@ public sealed class RuntimeConfigServiceFileResolutionTests : IDisposable
 
         Assert.Equal(AgentsConfig.Default, agents);
     }
+
+    [Fact]
+    public void LoadPreferences_ReturnsDefault_WhenNoFileExists()
+    {
+        var service = new AppPreferencesService(_root);
+
+        Assert.Equal(AppPreferences.Default, service.Load());
+        Assert.False(service.Load().HideCliConsole);
+    }
+
+    [Fact]
+    public void PreferencesSurviveASaveAndReload()
+    {
+        var service = new AppPreferencesService(_root);
+
+        service.Save(new AppPreferences(HideCliConsole: true));
+
+        Assert.True(service.Load().HideCliConsole);
+    }
+
+    [Fact]
+    public void LoadPreferences_ReturnsDefault_WhenFileIsBroken()
+    {
+        var dataDir = Path.Combine(_root, "data");
+        Directory.CreateDirectory(dataDir);
+        File.WriteAllText(Path.Combine(dataDir, "preferences.json"), "{ not valid json");
+
+        Assert.Equal(AppPreferences.Default, new AppPreferencesService(_root).Load());
+    }
 }
