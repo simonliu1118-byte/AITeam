@@ -31,15 +31,21 @@ public sealed class DecisionGateDialog : Form
     private static readonly Color Accent = Color.FromArgb(43, 108, 176);
 
     private readonly ComboBox _writerBox = new();
-    private readonly IReadOnlyList<ProviderId> _candidates;
+    private readonly List<ProviderId> _candidates;
 
     public DecisionGateChoice Choice { get; private set; } = DecisionGateChoice.Cancel;
     public ProviderId Writer { get; private set; }
 
-    public DecisionGateDialog(IReadOnlyList<ProviderId> participants)
+    /// <param name="remembered">
+    /// 上次選過的那一家。它不在這場會議的參與者裡（沒上線、或被換掉了）就忽略，
+    /// 照預設順序決定。
+    /// </param>
+    public DecisionGateDialog(IReadOnlyList<ProviderId> participants, ProviderId? remembered = null)
     {
         _candidates = OrderCandidates(participants);
-        Writer = _candidates.Count > 0 ? _candidates[0] : ProviderId.Claude;
+        Writer = remembered is { } previous && _candidates.Contains(previous)
+            ? previous
+            : _candidates.Count > 0 ? _candidates[0] : ProviderId.Claude;
 
         Text = "AITeam - 送去執行";
         StartPosition = FormStartPosition.CenterParent;
@@ -60,7 +66,7 @@ public sealed class DecisionGateDialog : Form
     /// 差別在速度：Antigravity 光啟動就比另外兩家慢很多，放在使用者等著送出的路徑上不合適。
     /// 使用者隨時可以在下拉選單裡換人。
     /// </summary>
-    internal static IReadOnlyList<ProviderId> OrderCandidates(IReadOnlyList<ProviderId> participants)
+    internal static List<ProviderId> OrderCandidates(IReadOnlyList<ProviderId> participants)
     {
         var preference = new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity };
         return preference.Where(participants.Contains).ToList();
@@ -134,7 +140,11 @@ public sealed class DecisionGateDialog : Form
         _writerBox.Font = new Font("Microsoft JhengHei UI", 9.5F);
         _writerBox.Margin = new Padding(0);
         foreach (var candidate in _candidates) _writerBox.Items.Add(candidate.ToFriendlyName());
-        if (_writerBox.Items.Count > 0) _writerBox.SelectedIndex = 0;
+        if (_writerBox.Items.Count > 0)
+        {
+            var index = _candidates.IndexOf(Writer);
+            _writerBox.SelectedIndex = index >= 0 ? index : 0;
+        }
         _writerBox.Enabled = _writerBox.Items.Count > 1;
         _writerBox.SelectedIndexChanged += (_, _) =>
         {
