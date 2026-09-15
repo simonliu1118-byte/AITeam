@@ -20,6 +20,7 @@ public sealed class MeetingForm : Form
     private const int CallWarningThreshold = 12;
 
     private readonly MeetingService _meetings;
+    private readonly AppPreferencesService _preferences;
     private readonly TaskHistoryService _history;
     private readonly IReadOnlyList<ProjectEntry> _projects;
     private readonly IReadOnlyList<ProviderId> _participants;
@@ -88,6 +89,7 @@ public sealed class MeetingForm : Form
         IReadOnlyList<ProviderId> participants)
     {
         _meetings = new MeetingService(runtimeRoot, runner);
+        _preferences = new AppPreferencesService(runtimeRoot);
         _history = history;
         _projects = projects;
         _participants = participants;
@@ -688,12 +690,20 @@ public sealed class MeetingForm : Form
         // 使用者在輸入框裡打的最後一段話也算結論的一部分，不要漏掉。
         RecordUserRemark(concluding: false);
 
-        using var gate = new DecisionGateDialog(_participants);
+        var saved = _preferences.Load();
+        using var gate = new DecisionGateDialog(_participants, saved.DecisionWriter);
         if (gate.ShowDialog(this) != DialogResult.OK || gate.Choice == DecisionGateChoice.Cancel) return;
 
-        var conclusion = gate.Choice == DecisionGateChoice.Draft
-            ? await DraftDecisionAsync(gate.Writer)
-            : UnconvergedConclusion();
+        MeetingConclusion? conclusion;
+        if (gate.Choice == DecisionGateChoice.Draft)
+        {
+            RememberWriter(saved, gate.Writer);
+            conclusion = await DraftDecisionAsync(gate.Writer);
+        }
+        else
+        {
+            conclusion = UnconvergedConclusion();
+        }
 
         // 定案書寫失敗而且使用者不想直接送，就留在會議裡，不要把會議收掉。
         if (conclusion is null) return;
@@ -704,6 +714,15 @@ public sealed class MeetingForm : Form
 
         SendToPipelineRequested?.Invoke(this, conclusion);
         Close();
+    }
+
+    /// <summary>
+    /// 記住這次選的整理者，下次直接帶入。存不起來不是什麼大事，不要因此擋住送出。
+    /// </summary>
+    private void RememberWriter(AppPreferences saved, ProviderId writer)
+    {
+        if (saved.DecisionWriter == writer) return;
+        try { _preferences.Save(saved with { DecisionWriter = writer }); } catch { }
     }
 
     private MeetingConclusion UnconvergedConclusion() => new(

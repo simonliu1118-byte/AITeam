@@ -219,4 +219,30 @@ public sealed class RuntimeConfigServiceFileResolutionTests : IDisposable
 
         Assert.Equal(AppPreferences.Default, new AppPreferencesService(_root).Load());
     }
+
+    [Fact]
+    public void DecisionWriterSurvivesASaveAndReload()
+    {
+        var service = new AppPreferencesService(_root);
+
+        service.Save(new AppPreferences(HideCliConsole: false, DecisionWriter: ProviderId.Codex));
+
+        Assert.Equal(ProviderId.Codex, service.Load().DecisionWriter);
+    }
+
+    [Fact]
+    public void UnknownDecisionWriter_IsIgnoredRatherThanCrashing()
+    {
+        var dataDir = Path.Combine(_root, "data");
+        Directory.CreateDirectory(dataDir);
+        File.WriteAllText(
+            Path.Combine(dataDir, "preferences.json"),
+            """{ "hide_cli_console": true, "decision_writer": "Copilot" }""");
+
+        var preferences = new AppPreferencesService(_root).Load();
+
+        // 認不得的名字（舊版留下來的、或手動亂改的）就當作沒記過，其他設定照樣要讀得到。
+        Assert.Null(preferences.DecisionWriter);
+        Assert.True(preferences.HideCliConsole);
+    }
 }

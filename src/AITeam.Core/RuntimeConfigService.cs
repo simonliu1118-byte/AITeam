@@ -147,7 +147,7 @@ public sealed class RuntimeConfigService
 /// 使用者自己在「設定」視窗裡調的偏好。跟 settings.json／agents.json 不同的是，
 /// 這份是程式自己寫回去的，不是給人手動編輯的。
 /// </summary>
-public sealed record AppPreferences(bool HideCliConsole)
+public sealed record AppPreferences(bool HideCliConsole, ProviderId? DecisionWriter = null)
 {
     public static readonly AppPreferences Default = new(false);
 }
@@ -179,7 +179,8 @@ public sealed class AppPreferencesService
         var payload = new
         {
             schema_version = 1,
-            hide_cli_console = preferences.HideCliConsole
+            hide_cli_console = preferences.HideCliConsole,
+            decision_writer = preferences.DecisionWriter?.ToString()
         };
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         File.WriteAllText(
@@ -197,13 +198,26 @@ public sealed class AppPreferencesService
         });
 
         var hide = AppPreferences.Default.HideCliConsole;
-        if (document.RootElement.ValueKind == JsonValueKind.Object &&
-            document.RootElement.TryGetProperty("hide_cli_console", out var value) &&
-            (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False))
+        var writer = AppPreferences.Default.DecisionWriter;
+
+        if (document.RootElement.ValueKind == JsonValueKind.Object)
         {
-            hide = value.GetBoolean();
+            if (document.RootElement.TryGetProperty("hide_cli_console", out var value) &&
+                (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False))
+            {
+                hide = value.GetBoolean();
+            }
+
+            // 記下來的那家可能已經不在線上，甚至可能是舊版留下來的名字；
+            // 認不得就當作沒記過，讓預設順序去決定。
+            if (document.RootElement.TryGetProperty("decision_writer", out var writerValue) &&
+                writerValue.ValueKind == JsonValueKind.String &&
+                Enum.TryParse<ProviderId>(writerValue.GetString(), ignoreCase: true, out var parsed))
+            {
+                writer = parsed;
+            }
         }
 
-        return new AppPreferences(hide);
+        return new AppPreferences(hide, writer);
     }
 }
