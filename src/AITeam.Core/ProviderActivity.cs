@@ -16,9 +16,30 @@ public static class ProviderActivity
     public static string? Describe(ProviderId provider, string line) => provider switch
     {
         ProviderId.Antigravity => DescribeJsonEvent(line),
-        ProviderId.Claude => DescribeJsonEvent(line) ?? DescribePlainLine(line),
+        ProviderId.Claude => DescribeClaudeLine(line) ?? DescribePlainLine(line),
         _ => DescribePlainLine(line)
     };
+
+    /// <summary>
+    /// Claude 的串流事件跟另外兩家長得不一樣：工具名稱包在
+    /// <c>message.content[]</c> 裡面的 <c>tool_use</c> 區塊，通用的找法抓不到。
+    /// </summary>
+    private static string? DescribeClaudeLine(string line)
+    {
+        var text = line.TrimStart();
+        if (text.Length == 0 || text[0] != '{') return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            var described = ClaudeStream.DescribeEvent(document.RootElement);
+            return described is null ? null : Shorten(described);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static string? DescribePlainLine(string line)
     {

@@ -89,24 +89,57 @@ public sealed class ProviderClient
     private async Task<string> AskClaudeAsync(
         string workingDirectory, string prompt, TimeSpan timeout, Action<string>? sink, CancellationToken cancellationToken)
     {
-        var result = await _runner.RunAsync(
+        // 串流格式才看得到它中途在做什麼；text 格式整個過程是黑的，只有最後才吐答案。
+        // （stream-json 在 -p 模式下必須搭配 --verbose。）
+        var streaming = await _runner.RunAsync(
             _agents.ClaudeCommand,
-            new[]
-            {
-                "-p", prompt,
-                "--output-format", "text",
-                "--max-turns", "20",
-                "--model", "sonnet",
-                "--permission-mode", "plan",
-                "--no-session-persistence"
-            },
+            ClaudeArguments(prompt, "stream-json", verbose: true),
             workingDirectory,
             null,
             timeout,
             cancellationToken,
             sink);
-        if (result.ExitCode != 0) throw new InvalidOperationException(DescribeFailure(result));
-        return result.StandardOutput;
+
+        if (streaming.ExitCode == 0)
+        {
+            if (ClaudeStream.IsErrorResult(streaming.StandardOutput))
+                throw new InvalidOperationException(DescribeFailure(streaming));
+
+            var answer = ClaudeStream.ExtractAnswer(streaming.StandardOutput);
+            if (!string.IsNullOrWhiteSpace(answer)) return answer;
+        }
+
+        // 這台機器上的 CLI 版本不吃這些參數時，退回原本一定能用的純文字格式，
+        // 只是那樣就看不到即時進度。失敗原因不是參數問題就不要退，直接照實報錯。
+        var combined = $"{streaming.StandardError}\n{streaming.StandardOutput}";
+        if (streaming.ExitCode != 0 && !ProviderHealthService.LooksLikeUnsupportedArgument(combined))
+            throw new InvalidOperationException(DescribeFailure(streaming));
+
+        var plain = await _runner.RunAsync(
+            _agents.ClaudeCommand,
+            ClaudeArguments(prompt, "text", verbose: false),
+            workingDirectory,
+            null,
+            timeout,
+            cancellationToken,
+            sink);
+        if (plain.ExitCode != 0) throw new InvalidOperationException(DescribeFailure(plain));
+        return plain.StandardOutput;
+    }
+
+    private static string[] ClaudeArguments(string prompt, string outputFormat, bool verbose)
+    {
+        var args = new List<string>
+        {
+            "-p", prompt,
+            "--output-format", outputFormat,
+            "--max-turns", "20",
+            "--model", "sonnet",
+            "--permission-mode", "plan",
+            "--no-session-persistence"
+        };
+        if (verbose) args.Add("--verbose");
+        return args.ToArray();
     }
 
     private async Task<string> AskAntigravityAsync(
