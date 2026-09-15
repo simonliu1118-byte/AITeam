@@ -794,12 +794,19 @@ public sealed class MainWindow : Form
         AppendLog("AI 檢查完成。");
     }
 
-    private async Task HandleSendAsync()
+    /// <param name="presetRequest">
+    /// 非 null 代表這次任務不是從輸入框送出的（目前是會議結論交接過來）。
+    /// </param>
+    /// <param name="background">
+    /// 一併交給 AI 的背景（會議結論）。它只影響送給 AI 的內容，不會顯示在「目前任務」裡——
+    /// 那一格要留給使用者自己講的那句需求。
+    /// </param>
+    private async Task HandleSendAsync(string? presetRequest = null, string? background = null)
     {
-        if (string.IsNullOrWhiteSpace(_requestBox.Text)) return;
+        if (presetRequest is null && string.IsNullOrWhiteSpace(_requestBox.Text)) return;
         if (_taskRunning)
         {
-            AddNoteToRunningTask();
+            if (presetRequest is null) AddNoteToRunningTask();
             return;
         }
 
@@ -812,9 +819,9 @@ public sealed class MainWindow : Form
         var candidates = GetProviderCandidates();
         if (!PassesPreflight(project, candidates.Count)) return;
 
-        var request = _requestBox.Text.Trim();
+        var request = presetRequest ?? _requestBox.Text.Trim();
         _currentTaskBox.Text = request;
-        _requestBox.Clear();
+        if (presetRequest is null) _requestBox.Clear();
         _taskRequest = request;
         _taskProjectName = project.Name;
         _taskLog.Clear();
@@ -833,7 +840,7 @@ public sealed class MainWindow : Form
         {
             var result = await _inquiryService.RunAsync(
                 project,
-                request,
+                ComposeRequest(request, background),
                 candidates,
                 AskPlanGateAsync,
                 text => AppendLog(text),
@@ -872,6 +879,20 @@ public sealed class MainWindow : Form
         {
             if (!IsDisposed) SetTaskRunning(false);
         }
+    }
+
+    /// <summary>
+    /// 會議結論當成背景接在需求後面。講明它已經被使用者確認過，讓 Plan Gate 不必把
+    /// 討論過的東西再問一次。
+    /// </summary>
+    private static string ComposeRequest(string request, string? background)
+    {
+        if (string.IsNullOrWhiteSpace(background)) return request;
+
+        return request + Environment.NewLine + Environment.NewLine
+            + "以下是先前 AI 四方會議談出來的結論，已經由使用者確認，請當作背景採用，"
+            + "不要重新討論這些已經決定好的事：" + Environment.NewLine
+            + background;
     }
 
     /// <summary>
@@ -1269,8 +1290,49 @@ public sealed class MainWindow : Form
 
         // 非強制回應：開著會議的同時還可以在主畫面送任務。
         var form = new MeetingForm(_runtimeRoot, _runner, _taskHistory, _projects, participants);
+        // 用 BeginInvoke 延到會議視窗真的關掉之後才處理，否則交接視窗會卡在
+        // 會議視窗前面、而會議視窗還沒關。
+        form.SendToPipelineRequested += (_, conclusion) =>
+            BeginInvoke(new Action(async () => await HandOffMeetingAsync(conclusion)));
         form.FormClosed += (_, _) => form.Dispose();
         form.Show(this);
+    }
+
+    /// <summary>
+    /// 會議談完之後把結論送進修改管線。要對哪個專案做由使用者在這裡決定——會議可以是
+    /// 純討論、沒有綁專案，而且討論完才想新增一個專案也很正常。
+    /// </summary>
+    private async Task HandOffMeetingAsync(MeetingConclusion conclusion)
+    {
+        if (_taskRunning)
+        {
+            MessageBox.Show(
+                "目前還有任務在執行，請等它結束或按「停止」之後再送出。",
+                "AITeam", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new MeetingHandoffDialog(conclusion, _projects);
+        dialog.ManageProjects = () =>
+        {
+            OpenProjectManager();
+            return _projects;
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Project is null) return;
+
+        SelectProject(dialog.Project.Name);
+        await HandleSendAsync(dialog.Request, dialog.Conclusion);
+    }
+
+    private void SelectProject(string name)
+    {
+        for (var i = 0; i < _projectBox.Items.Count; i++)
+        {
+            if ((_projectBox.Items[i] as ProjectEntry)?.Name.Equals(name, StringComparison.OrdinalIgnoreCase) != true) continue;
+            _projectBox.SelectedIndex = i;
+            return;
+        }
     }
 
     private void OpenTaskHistory()

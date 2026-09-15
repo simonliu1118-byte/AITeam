@@ -68,6 +68,12 @@ public static class MeetingScaleExtensions
     };
 }
 
+/// <summary>
+/// 一場會議談完之後要交給修改管線的東西。會議只負責「談出結論」，
+/// 要不要做、對哪個專案做，由使用者在交接時決定。
+/// </summary>
+public sealed record MeetingConclusion(string Topic, string? ProjectName, string Text);
+
 public sealed record MeetingSetup(
     string Topic,
     ProjectEntry? Project,
