@@ -142,3 +142,68 @@ public sealed class RuntimeConfigService
         return null;
     }
 }
+
+/// <summary>
+/// 使用者自己在「設定」視窗裡調的偏好。跟 settings.json／agents.json 不同的是，
+/// 這份是程式自己寫回去的，不是給人手動編輯的。
+/// </summary>
+public sealed record AppPreferences(bool HideCliConsole)
+{
+    public static readonly AppPreferences Default = new(false);
+}
+
+public sealed class AppPreferencesService
+{
+    private readonly string _runtimeRoot;
+
+    public AppPreferencesService(string runtimeRoot) => _runtimeRoot = runtimeRoot;
+
+    private string FilePath => Path.Combine(_runtimeRoot, "data", "preferences.json");
+
+    public AppPreferences Load()
+    {
+        try
+        {
+            if (!File.Exists(FilePath)) return AppPreferences.Default;
+            return Parse(File.ReadAllText(FilePath, Encoding.UTF8));
+        }
+        catch
+        {
+            // 偏好讀不到就用預設值，不要讓程式開不起來。
+            return AppPreferences.Default;
+        }
+    }
+
+    public void Save(AppPreferences preferences)
+    {
+        var payload = new
+        {
+            schema_version = 1,
+            hide_cli_console = preferences.HideCliConsole
+        };
+        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+        File.WriteAllText(
+            FilePath,
+            JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine,
+            new UTF8Encoding(false));
+    }
+
+    internal static AppPreferences Parse(string json)
+    {
+        using var document = JsonDocument.Parse(json, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = true,
+            CommentHandling = JsonCommentHandling.Skip
+        });
+
+        var hide = AppPreferences.Default.HideCliConsole;
+        if (document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("hide_cli_console", out var value) &&
+            (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False))
+        {
+            hide = value.GetBoolean();
+        }
+
+        return new AppPreferences(hide);
+    }
+}
