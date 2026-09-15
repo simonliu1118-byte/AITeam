@@ -25,7 +25,8 @@ public sealed class MeetingHandoffDialog : Form
 
     public ProjectEntry? Project { get; private set; }
     public string Request { get; private set; } = "";
-    public string Conclusion { get; }
+    /// <summary>使用者實際同意送出去的那一份文字——他在下面那個框裡改過的版本。</summary>
+    public string Conclusion { get; private set; }
 
     /// <summary>按「管理專案…」時交還給主畫面處理，回來時帶著最新的專案清單。</summary>
     public Func<IReadOnlyList<ProjectEntry>>? ManageProjects { get; set; }
@@ -101,17 +102,19 @@ public sealed class MeetingHandoffDialog : Form
 
         FillProjects(conclusion.ProjectName);
 
-        shell.Controls.Add(MakeFieldLabel("要送出的需求（預設帶入會議結論，可以改寫成更明確的一句話）"), 0, 2);
+        shell.Controls.Add(MakeFieldLabel("要送出的需求（可以改寫成更明確的一句話）"), 0, 2);
 
         _requestBox.Dock = DockStyle.Fill;
         _requestBox.Multiline = true;
         _requestBox.ScrollBars = ScrollBars.Vertical;
         _requestBox.Font = new Font("Microsoft JhengHei UI", 10F);
         _requestBox.Margin = new Padding(0, 4, 0, 12);
-        _requestBox.Text = conclusion.Text;
+        // 以前這裡直接塞整份結論，但結論本來就會當成背景一起送過去——
+        // 等於同一段話讓 Planner 讀兩次。需求欄留一句短的就好，該說的在下面那份。
+        _requestBox.Text = $"依照下面這份會議結論執行：{conclusion.Topic}";
         shell.Controls.Add(_requestBox, 0, 4);
 
-        shell.Controls.Add(MakeFieldLabel("會議結論（會一併當成背景交給 AI，不需要重新討論）"), 0, 3);
+        shell.Controls.Add(MakeFieldLabel(DescribeConclusion(conclusion)), 0, 3);
 
         var card = new RoundedCard
         {
@@ -123,7 +126,9 @@ public sealed class MeetingHandoffDialog : Form
             Margin = new Padding(0, 4, 0, 12)
         };
         _conclusionBox.Multiline = true;
-        _conclusionBox.ReadOnly = true;
+        // 這一份才是真正交給改程式的 AI 的東西，所以要讓使用者能當場改：
+        // 刪掉不同意的、補上自己的決定。送出去的就是他看過並改過的版本。
+        _conclusionBox.ReadOnly = false;
         _conclusionBox.BorderStyle = BorderStyle.None;
         _conclusionBox.BackColor = CardBackground;
         _conclusionBox.ForeColor = Color.FromArgb(55, 62, 70);
@@ -197,11 +202,29 @@ public sealed class MeetingHandoffDialog : Form
             return;
         }
 
+        var conclusion = _conclusionBox.Text.Trim();
+        if (conclusion.Length == 0)
+        {
+            MessageBox.Show("會議結論不能是空的——那是接手的 AI 唯一看得到的背景。",
+                "AITeam", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
         Project = _projects[_projectBox.SelectedIndex];
         Request = request;
+        Conclusion = conclusion;
         DialogResult = DialogResult.OK;
         Close();
     }
+
+    /// <summary>
+    /// 標題要說實話。沒有收斂過的會議送出去時，使用者一定要看得出來下面那份東西
+    /// 是三個可能互相打架的立場，不是定案。
+    /// </summary>
+    private static string DescribeConclusion(MeetingConclusion conclusion) =>
+        conclusion.Kind == MeetingConclusionKind.Decision
+            ? $"定案書（由 {conclusion.Writer?.ToFriendlyName() ?? "AI"} 整理）——可以直接修改，送出去的就是這一份"
+            : "⚠ 這場會議沒有收斂出定案，下面只是每位最後的立場，可能互相矛盾——可以直接修改";
 
     private static Label MakeFieldLabel(string text) => new()
     {
