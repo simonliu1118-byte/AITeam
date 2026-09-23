@@ -1,37 +1,38 @@
 # CY Icon Family
 
-This folder is the canonical source for the CY Windows desktop application icon family.
+Canonical source for the shared CY desktop application icon family.
 
-## Read first
+This package is design/reference material, not a fourth governance layer.
 
-- `ICON_FAMILY.md` — the complete family specification, production workflow, AI handoff guidance, and acceptance checklist.
+## Files
+
+- `ICON_FAMILY.md` — complete family specification, production workflow, AI/designer handoff, scope, and acceptance checklist.
 - `CHANGELOG.md` — family-level design history.
-- `reference/` — concept/reference material that is useful for comparison but is not the precision production master.
+- `reference/CY_ICON_FAMILY_CONCEPT_V1.svg` — current accepted editable concept-board reference. It is a direction board, not the precision production master.
+- `reference/CY_ICON_FAMILY_CONCEPT_V1_HISTORICAL.jpg` — preserved earlier V1 visual concept for historical comparison only. It must not be treated as current geometry or production guidance.
 
-## Production layout
+## Production structure
 
-As the family is finalized, use:
+Production work should use this structure as it is created:
 
 ```text
 icon-family/
 ├─ README.md
 ├─ ICON_FAMILY.md
 ├─ CHANGELOG.md
-├─ reference/
 ├─ master/
 │  └─ CY_ICON_MASTER.svg
-└─ apps/
-   ├─ invoice/
-   ├─ accounting/
-   ├─ envelope/
-   ├─ erp-autoinput/
-   ├─ watermark/
-   ├─ converter/
-   └─ tri-invoice-calc/
+├─ apps/
+│  ├─ invoice/
+│  ├─ accounting/
+│  ├─ envelope/
+│  ├─ erp-autoinput/
+│  ├─ watermark/
+│  ├─ converter/
+│  └─ tri-invoice-calc/
+└─ reference/
+   ├─ CY_ICON_FAMILY_CONCEPT_V1.svg
+   └─ CY_ICON_FAMILY_CONCEPT_V1_HISTORICAL.jpg
 ```
 
-`master/` and `apps/` are created only when real production assets exist; empty placeholder directories are not needed.
-
-## Source-of-truth rule
-
-Family-level changes are made here first. Application repositories receive only their approved app-specific production assets after the family is finalized. Do not maintain independent copies of the family specification in CYapps or CYapps_pvt unless a concrete future workflow requires it.
+AITeam remains the single family-level canonical source. After a production icon is approved, the AI responsible for each application should copy only that application's approved assets into its project repository. Family-wide edits return here first.
