@@ -73,6 +73,7 @@ def export_one(identifier: str, app: str, folder: str, accent: str) -> dict:
         png_manifest[str(size)] = {
             "bytes": target.stat().st_size,
             "sha256": sha256(target),
+            "git_blob_sha1": git_blob_sha1(target),
             "dimensions": [size, size],
             "mode": mode,
         }
@@ -98,6 +99,7 @@ def export_one(identifier: str, app: str, folder: str, accent: str) -> dict:
         "ico": {
             "bytes": ico_path.stat().st_size,
             "sha256": sha256(ico_path),
+            "git_blob_sha1": git_blob_sha1(ico_path),
             "entries": [list(size) for size in actual],
         },
     }
