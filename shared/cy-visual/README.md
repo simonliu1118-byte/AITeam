@@ -19,7 +19,7 @@ This keeps AITeam as the single visual source of truth without creating another 
 
 ## Packages
 
-- `icon-family/` — CY Windows desktop application icon family, shared master/reference material, and later app-specific production exports.
+- `icon-family/` — CY Windows desktop application icon family, shared master/reference material, and app-specific production exports.
 - `desktop/` — reserved for the CY Desktop Visual Guide after that guide is explicitly promoted to the shared canonical source.
 
 ## Distribution model
@@ -32,7 +32,7 @@ Examples:
 - CYAccounting receives ACC assets.
 - CYEnvelope receives ENV assets.
 - CYERPAutoInput receives Auto assets.
-- CYWatermark receives WTM assets.
+- CYWatermark receives WM assets.
 - SMARTCOPIConverter receives CVT assets.
 - TriINVCalc receives CAL assets.
 
