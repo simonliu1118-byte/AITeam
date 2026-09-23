@@ -131,6 +131,12 @@ The new family intentionally moves away from the slightly taller/narrower appare
 
 Exact master geometry should ultimately be frozen in an editable vector template. Until that vector master is completed, new concept work should match the accepted square-family concept board and be compared side by side with other accepted members.
 
+Current editable concept-board reference:
+
+`reference/CY_ICON_FAMILY_CONCEPT_V1.svg`
+
+This SVG is a **direction board**, not the final production master. It exists so future conversations can see the accepted family arrangement without depending on an ephemeral chat image.
+
 ### 4.3 Optical correction
 
 Small optical corrections are allowed when necessary, for example:
