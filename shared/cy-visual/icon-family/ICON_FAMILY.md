@@ -1,6 +1,6 @@
 # CY App Icon Family
 
-> Status: `SHARED DESIGN SOURCE / VECTOR PRODUCTION CANDIDATE`
+> Status: `SHARED DESIGN SOURCE / PRODUCTION ASSETS READY`
 >
 > Canonical repository: `simonliu1118-byte/AITeam`
 >
@@ -66,9 +66,9 @@ The current app SVGs preserve the silhouettes from the user-approved visual sour
 
 The two horizontal lines are an INV-specific motif, not a universal family mark.
 
-## 5. Canonical per-app vector sources
+## 5. Canonical production assets
 
-Current vector production candidates:
+Canonical per-app vector sources:
 
 - `apps/invoice/INV.svg`
 - `apps/accounting/ACC.svg`
@@ -78,11 +78,24 @@ Current vector production candidates:
 - `apps/converter/CVT.svg`
 - `apps/tri-invoice-calc/CAL.svg`
 
-These files are the source for later PNG/ICO export. Do not recreate production icons from prompts once an accepted SVG exists.
+Each app directory also contains:
+
+- `png/16.png`
+- `png/24.png`
+- `png/32.png`
+- `png/48.png`
+- `png/64.png`
+- `png/128.png`
+- `png/256.png`
+- `<IDENTIFIER>.ico`
+
+`ASSET_MANIFEST.json` records source and derived byte sizes, SHA-256 values, Git blob SHA-1 values, PNG dimensions/modes, and ICO entry sizes. `tools/export_icons.py` is the reproducible derivation path.
+
+Do not recreate production icons from prompts once an accepted SVG exists.
 
 ## 6. Color treatment
 
-Each app uses one accent family for frame, identifier, and motif. The current vector candidates use a very small same-hue gradient to preserve the approved visual character without introducing gloss or 3D styling.
+Each app uses one accent family for frame, identifier, and motif. The current vectors use a very small same-hue gradient to preserve the approved visual character without introducing gloss or 3D styling.
 
 The white inner field is common across the family.
 
@@ -90,22 +103,20 @@ Any future color change should be reviewed side by side with the full family rat
 
 ## 7. Small-size Windows production
 
-Formal Windows output should include or inspect at least:
+Formal Windows output includes native layers at:
 
 `16 / 24 / 32 / 48 / 64 / 128 / 256 px`
 
-Do not assume a mechanical 256 px downscale is automatically final.
+The current exporter renders every PNG directly from the canonical SVG at its target size; it does not mechanically generate the whole set from one 256 px raster. The ICO is then constructed from those exact seven PNG payloads.
 
-Allowed small-size corrections include:
+The exporter verifies:
 
-- stroke thickening;
-- gap simplification;
-- motif simplification;
-- optical centering;
-- pixel snapping;
-- identifier/motif balance adjustment.
+- each PNG has the expected dimensions;
+- each ICO exposes all seven expected native sizes;
+- source and derived byte size / SHA-256 values;
+- Git blob SHA-1 values used for repository read-back verification.
 
-Engineering previews have been generated locally at 48 / 32 / 24 / 16 px from the current SVGs. They remain derived-preview validation, not a substitute for real Windows Explorer/taskbar acceptance.
+Real Windows Explorer/taskbar appearance remains a separate integration acceptance step because shell cache and native presentation cannot be fully represented by repository CI.
 
 ## 8. Production workflow
 
@@ -115,11 +126,10 @@ Use this order:
 2. Keep shared body geometry unchanged.
 3. Adjust only identifier, accent, lower motif, and necessary optical corrections.
 4. Review the whole family side by side.
-5. Render required PNG layers.
-6. Build ICO from the approved layers.
-7. Verify binary byte size, dimensions/entries, and SHA-256 under repository binary-asset rules.
-8. Perform real Windows acceptance where Explorer/taskbar/cache behavior matters.
-9. After family approval, each app owner AI copies only that app's production assets into its project repository.
+5. Run `tools/export_icons.py` to render native PNG layers and build the ICO.
+6. Verify `ASSET_MANIFEST.json` and repository Git blob read-back.
+7. Perform real Windows acceptance where Explorer/taskbar/cache behavior matters.
+8. After family approval, each app owner AI copies only that app's production assets into its project repository.
 
 Family-level changes return to AITeam first.
 
@@ -184,15 +194,16 @@ Before a family source is considered final:
 - no accidental extra decoration is present;
 - icon remains readable at 48 px and at least one smaller size;
 - family remains coherent side by side;
-- derived PNG/ICO assets are traceable to the accepted SVG source;
-- binary source/read-back integrity checks are complete before app integration.
+- PNG/ICO assets are traceable to the accepted SVG source;
+- binary source/read-back integrity checks are complete before app integration;
+- real Windows shell appearance is checked when the app integrates the asset.
 
 ## 12. References and history
 
-- `reference/CY_ICON_FAMILY_CONCEPT_V1.svg` — concept reference; production geometry is now superseded by the master.
+- `reference/CY_ICON_FAMILY_CONCEPT_V1.svg` — concept reference; production geometry is superseded by the master.
 - `reference/CY_ICON_FAMILY_CONCEPT_V1_HISTORICAL.jpg` — preserved earlier V1 visual concept for design-history comparison only.
 - Historical CYInvoice live-area measurements remain useful only for understanding the ancestor icon; they do not control the new family.
 
 ## 13. Current next step
 
-The vector source layer is now present in AITeam. The next production step is to export verified PNG/ICO layers from these SVGs, perform small-size/native Windows checks, and only then distribute each app's approved assets to its owning repository.
+The canonical vector source and reproducible PNG/ICO production assets are now present in AITeam and have repository read-back identifiers recorded. The remaining acceptance work is real Windows Explorer/taskbar inspection during downstream app integration, followed by copying only the relevant app's approved assets into its owning repository.
