@@ -11,7 +11,7 @@
   </style>
   <text x="70" y="78" class="title">CY Apps · Icon Family — Square Concept V1</text>
   <text x="70" y="112" class="sub">Same square skeleton · app-specific motif · short uppercase ID by default · Auto is the approved readability exception</text>
-  <text x="1175" y="112" class="note">CONCEPT ONLY</text>
+  <text x="1175" y="112" class="note">CONCEPT REFERENCE</text>
 
   <!-- Row 1 -->
   <g transform="translate(85,175)" stroke="#1877F2">
@@ -54,7 +54,7 @@
   <!-- Row 2 -->
   <g transform="translate(245,520)" stroke="#0891B2">
     <rect class="frame" x="0" y="0" width="245" height="245" rx="34"/>
-    <text class="id" x="122.5" y="112" text-anchor="middle" fill="#0891B2" stroke="none">WTM</text>
+    <text class="id" x="122.5" y="112" text-anchor="middle" fill="#0891B2" stroke="none">WM</text>
     <path d="M83 132 H153 L178 157 V214 H83 Z" fill="none" stroke-width="10" stroke-linejoin="round"/>
     <path d="M153 132 V157 H178" fill="none" stroke-width="10" stroke-linejoin="round"/>
     <path d="M128 161 C112 181 108 190 108 199 A20 20 0 0 0 148 199 C148 190 144 181 128 161 Z" fill="#0891B2" stroke="none"/>
@@ -82,5 +82,5 @@
     <text class="name" x="122.5" y="286" text-anchor="middle" stroke="none">TriINVCalc</text>
   </g>
 
-  <text x="70" y="860" class="note">Reference intent: family structure only. Exact production geometry and final accent HEX values remain to be frozen in the editable master.</text>
+  <text x="70" y="860" class="note">Concept reference only. Production geometry is defined by master/CY_ICON_MASTER.svg and per-app vector sources.</text>
 </svg>
