@@ -1,6 +1,6 @@
 # CY App Icon Family
 
-> Status: `REFERENCE / SHARED DESIGN SOURCE`
+> Status: `SHARED DESIGN SOURCE / VECTOR PRODUCTION CANDIDATE`
 >
 > Canonical repository: `simonliu1118-byte/AITeam`
 >
@@ -10,162 +10,120 @@
 
 The CY App Icon Family makes CY Windows desktop applications look visibly related while keeping each app easy to distinguish.
 
-The family is unified by a shared **square-card geometry, visual mass, identifier hierarchy, frame language, and complexity level**. It is not unified by forcing every app to use the same lower symbol.
+The family is unified by one square-card body, white inner field, identifier/motif hierarchy, visual mass, and complexity level. Each app keeps its own identifier, accent, and lower motif.
 
-The production model is based on **one editable vector family master**. New app icons should be derived from that master rather than independently generated from prompts.
+AITeam is the family-level canonical source. App repositories should not redesign the family independently.
 
-## 2. Current direction
+## 2. Approved visual direction
 
-The accepted direction is a **new square, visually fuller family master** derived from the CYInvoice / INV visual language.
-
-The current production CYInvoice icon is the historical visual ancestor, but its slightly taller/narrower measured geometry is **not** the future family geometry target. The new master should preserve the successful INV character while normalizing the family into a more square shared body.
+The approved direction is the square/full family derived from the CYInvoice / INV visual language and the user-approved family concept board.
 
 Core appearance:
 
 - square canvas;
-- visually square rounded-card body;
+- visually full rounded-square card body;
 - white interior;
-- one dominant accent color per app;
-- colored rounded-square frame;
+- one dominant accent family per app;
 - large identifier in the upper zone;
 - one simple app-specific motif in the lower zone;
-- flat, clean, high-contrast Windows business-software appearance;
-- no heavy shadow, gloss, 3D treatment, or decorative illustration clutter.
+- clean, high-contrast Windows business-software appearance;
+- no heavy shadow, 3D treatment, gloss, or decorative illustration clutter.
 
-The existing concept board is stored at:
+The old taller/narrower CYInvoice measurements remain historical reference only. They are not the production geometry target.
 
-`reference/CY_ICON_FAMILY_CONCEPT_V1.svg`
+## 3. Production master — frozen candidate geometry
 
-It is a visual reference, not the precision production master.
+Canonical master:
 
-## 3. Family skeleton — CORE
+`master/CY_ICON_MASTER.svg`
 
-### 3.1 Outer body
+Current normalized geometry:
 
-All family members should share closely matched:
+- Canvas: `512 × 512`.
+- Outer body: `x=36, y=36, w=440, h=440, rx=54`.
+- White inner field: `x=62, y=62, w=388, h=388, rx=39`.
+- Identifier occupies the upper visual zone.
+- Motif occupies the lower visual zone.
+- App content may receive small optical corrections, but the body geometry does not change per app.
 
-- body proportion;
-- frame thickness;
-- corner-radius language;
-- white inner field;
-- apparent live area;
-- outer/inner clear-space balance;
-- overall visual mass.
+The current app SVGs preserve the silhouettes from the user-approved visual sources while normalizing the shared body to this master.
 
-When displayed side by side, one app must not look conspicuously smaller, narrower, taller, heavier, or more edge-to-edge than the others.
+## 4. Current family members
 
-### 3.2 Identifier zone
+| Project / App | Display family name | Identifier | Accent base | Motif |
+|---|---|---|---|---|
+| CYInvoice | CYInvoice | `INV` | `#006EFE` | invoice/detail lines |
+| CYAccounting | CYAccounting | `ACC` | `#03A844` | accounting bars + money |
+| CYEnvelope | CYEnvelope | `ENV` | `#761EE1` | envelope |
+| CYERPAutoInput | CYERPAutoInput | `Auto` | `#FE6A02` | document/input + direction |
+| CYWatermark | CYWatermark | `WM` | `#019EB9` | marked document / water drop |
+| SMARTCOPIConverter | CYConverter | `CVT` | `#F09D03` | document conversion |
+| TriINVCalc | CYTriplicateCalculator | `CAL` | `#FD4944` | calculator |
 
-Default rule:
+`WM` supersedes the earlier `WTM` identifier by explicit user decision.
 
-> Use a short uppercase abbreviation whenever it remains reasonably recognizable.
+`Auto` remains the approved readability exception to the short-uppercase default.
 
-Current identifiers:
+The two horizontal lines are an INV-specific motif, not a universal family mark.
 
-| App | Identifier |
-|---|---|
-| CYInvoice | `INV` |
-| CYAccounting | `ACC` |
-| CYEnvelope | `ENV` |
-| CYERPAutoInput | `Auto` — approved readability exception |
-| CYWatermark | `WTM` |
-| SMARTCOPIConverter | `CVT` |
-| TriINVCalc | `CAL` |
+## 5. Canonical per-app vector sources
 
-Different letter shapes may receive small optical corrections. Comparable apparent size matters more than identical font-size numbers.
+Current vector production candidates:
 
-`Auto` changes only the identifier strategy. It does not permit a different frame, body proportion, motif scale, or family weight.
+- `apps/invoice/INV.svg`
+- `apps/accounting/ACC.svg`
+- `apps/envelope/ENV.svg`
+- `apps/erp-autoinput/Auto.svg`
+- `apps/watermark/WM.svg`
+- `apps/converter/CVT.svg`
+- `apps/tri-invoice-calc/CAL.svg`
 
-### 3.3 Motif zone
+These files are the source for later PNG/ICO export. Do not recreate production icons from prompts once an accepted SVG exists.
 
-The lower zone contains **one simple app-specific motif**.
+## 6. Color treatment
 
-| App | Motif direction |
-|---|---|
-| INV | invoice/detail lines |
-| ACC | accounting/chart/money |
-| ENV | envelope |
-| Auto | automated input / document + direction |
-| WTM | watermark / marked document |
-| CVT | conversion / document transform |
-| CAL | calculator |
+Each app uses one accent family for frame, identifier, and motif. The current vector candidates use a very small same-hue gradient to preserve the approved visual character without introducing gloss or 3D styling.
 
-The two horizontal lines are an **INV-specific motif**, not a universal family mark.
+The white inner field is common across the family.
 
-The motif remains visually secondary to the identifier. If a function requires too much detail to fit cleanly, simplify the motif rather than enlarge or overcrowd the icon.
+Any future color change should be reviewed side by side with the full family rather than one icon in isolation.
 
-## 4. Color
+## 7. Small-size Windows production
 
-Each app may use one distinct accent color. Use that accent consistently for:
-
-- frame;
-- identifier;
-- motif.
-
-The white inner field remains common.
-
-Color should help distinguish apps, but the family must still look related through geometry and hierarchy without relying on color alone.
-
-Final app HEX values are frozen only when the production family is approved.
-
-## 5. Production master
-
-The final `master/CY_ICON_MASTER.svg` should freeze at least:
-
-- canvas and live area;
-- outer frame bounds;
-- frame thickness;
-- corner radius;
-- identifier zone;
-- motif zone;
-- vertical spacing between identifier and motif;
-- safe optical-adjustment limits;
-- common stroke language.
-
-Once frozen, an app icon is produced by changing only the approved variables:
-
-1. identifier;
-2. accent color;
-3. lower motif;
-4. small optical corrections required by letter/motif shape.
-
-The master must remain editable vector artwork. Generative output is concept material, not the geometry source of truth.
-
-## 6. Small-size Windows production
-
-Formal Windows production should inspect native layers at least at:
+Formal Windows output should include or inspect at least:
 
 `16 / 24 / 32 / 48 / 64 / 128 / 256 px`
 
-Do not mechanically downscale one 256 px image and assume every layer is finished.
+Do not assume a mechanical 256 px downscale is automatically final.
 
 Allowed small-size corrections include:
 
 - stroke thickening;
 - gap simplification;
 - motif simplification;
-- identifier size adjustment;
+- optical centering;
 - pixel snapping;
-- optical centering.
+- identifier/motif balance adjustment.
 
-The perceived identity, family silhouette, and identifier/motif hierarchy must remain stable across sizes.
+Engineering previews have been generated locally at 48 / 32 / 24 / 16 px from the current SVGs. They remain derived-preview validation, not a substitute for real Windows Explorer/taskbar acceptance.
 
-## 7. Production workflow
+## 8. Production workflow
 
 Use this order:
 
-1. Use the current CYInvoice/INV and accepted concept board as visual source material.
-2. Build and approve one precision square-family vector master.
-3. Produce the full family side by side: INV / ACC / ENV / Auto / WTM / CVT / CAL.
-4. Adjust identifiers, motifs, and app accent colors while preserving the master skeleton.
-5. Review the whole family together, not one icon in isolation.
-6. Export production PNG layers and ICO where needed.
-7. Verify source/derived asset integrity according to repository binary-asset rules.
-8. After the family is approved, each app owner AI copies only that app's approved production assets from AITeam into the target project.
+1. Start from `master/CY_ICON_MASTER.svg` and the approved app SVG.
+2. Keep shared body geometry unchanged.
+3. Adjust only identifier, accent, lower motif, and necessary optical corrections.
+4. Review the whole family side by side.
+5. Render required PNG layers.
+6. Build ICO from the approved layers.
+7. Verify binary byte size, dimensions/entries, and SHA-256 under repository binary-asset rules.
+8. Perform real Windows acceptance where Explorer/taskbar/cache behavior matters.
+9. After family approval, each app owner AI copies only that app's production assets into its project repository.
 
-Family-level changes always return to AITeam first.
+Family-level changes return to AITeam first.
 
-## 8. Repository scope
+## 9. Repository scope
 
 Included:
 
@@ -187,60 +145,54 @@ Excluded unless the user explicitly changes scope:
 - `DriveDownloader` — not a CY App Icon Family member.
 - `CYAccountingWeb` — web project; Windows desktop icon production rules do not automatically apply.
 
-## 9. AI / designer handoff
+## 10. AI / designer handoff
 
-Before creating or revising a family icon, use this document and the production master. Do not invent a fresh icon language per project.
+Before creating or revising a family icon:
 
-Reusable brief:
-
-```text
-Create or revise a CY Apps desktop icon from the approved CY square-family master.
+- read this document;
+- use `master/CY_ICON_MASTER.svg`;
+- use the app's existing SVG when it already exists;
+- do not invent a fresh icon language per project.
 
 Keep unchanged:
-- square family body and live area
-- frame thickness and corner language
-- white interior
-- identifier/motif vertical hierarchy
-- overall visual mass and clear-space rhythm
+
+- square family body and live area;
+- corner language;
+- white interior;
+- identifier/motif hierarchy;
+- overall visual mass and clear-space rhythm.
 
 App-specific variables:
-- Identifier: <IDENTIFIER>
-- Accent: <APP ACCENT>
-- Lower motif: <ONE SIMPLE APP-SPECIFIC MOTIF>
 
-Requirements:
-- flat, clean, high-contrast Windows business-software appearance
-- identifier remains dominant
-- motif remains secondary
-- no heavy shadow, 3D, gloss, or decorative clutter
-- do not add INV's two lines to other apps unless the motif genuinely calls for them
-- preserve small-size readability
-- compare side by side with the rest of the family before acceptance
-```
+- identifier;
+- accent;
+- one simple lower motif;
+- small optical corrections.
 
-AI-generated images may be used to explore a motif or color idea, but the accepted result must be rebuilt/normalized against the editable family master before production.
+Generative images may be used for concept exploration, but accepted production assets must be normalized into the editable vector family source before downstream use.
 
-## 10. Acceptance checklist
+## 11. Acceptance checklist
 
-Before an icon is accepted:
+Before a family source is considered final:
 
-- frame/body matches the approved master;
-- apparent size is comparable with other members;
+- frame/body matches the master;
+- apparent size is comparable with the other members;
 - identifier block has comparable visual weight;
 - identifier is optically centered;
 - motif is simple, app-specific, and secondary;
-- one-color + white family system is preserved;
+- one-accent + white family system is preserved;
 - no accidental extra decoration is present;
 - icon remains readable at 48 px and at least one smaller size;
-- the family still looks coherent when all icons are shown together;
-- production source and derived assets are traceable and reproducible.
+- family remains coherent side by side;
+- derived PNG/ICO assets are traceable to the accepted SVG source;
+- binary source/read-back integrity checks are complete before app integration.
 
-## 11. Historical INV geometry — reference only
+## 12. References and history
 
-Earlier measurement of the preserved CYInvoice production icon found an approximately **80–83% canvas width** and **86–88% canvas height** visible live area, with the 48 px layer around **39 × 42 px**.
+- `reference/CY_ICON_FAMILY_CONCEPT_V1.svg` — concept reference; production geometry is now superseded by the master.
+- `reference/CY_ICON_FAMILY_CONCEPT_V1_HISTORICAL.jpg` — preserved earlier V1 visual concept for design-history comparison only.
+- Historical CYInvoice live-area measurements remain useful only for understanding the ancestor icon; they do not control the new family.
 
-These measurements remain useful for understanding the historical source, but they are **not** the future square-family geometry target. The production master created in this package supersedes those values once approved.
+## 13. Current next step
 
-## 12. Current next step
-
-The next family task is not another document pass. It is to turn the accepted INV-derived square direction into the precision `master/CY_ICON_MASTER.svg`, then produce the complete seven-icon family from that master.
+The vector source layer is now present in AITeam. The next production step is to export verified PNG/ICO layers from these SVGs, perform small-size/native Windows checks, and only then distribute each app's approved assets to its owning repository.
