@@ -2,42 +2,63 @@
 
 > Canonical source: `simonliu1118-byte/AITeam`
 >
-> Status: shared design/reference material. This is **not** a fourth governance layer and does not replace `REPOSITORY_RULES.md`, `REPO_POLICY.md`, or project `PROJECT_RULES.md`.
+> Status: shared design/reference material adopted through the normal governance chain. This package is **not** a fourth governance layer and does not replace `REPOSITORY_RULES.md`, `REPO_POLICY.md`, or project `PROJECT_RULES.md`.
 
 ## Purpose
 
 `shared/cy-visual/` is the canonical home for CY cross-repository visual references and production design assets.
 
-The default model is deliberately simple:
+The model is deliberately simple:
 
-1. Design/reference documents live here in AITeam.
-2. They are not duplicated into every application repository unless there is a concrete need.
-3. When a production asset is approved, each application receives only the assets that belong to that application.
-4. App repositories should not independently redesign the shared family master; family-level changes return here first.
+1. Shared visual sources live in AITeam.
+2. Repositories that adopt a shared visual source declare that adoption in their normal `REPO_POLICY.md` / `PROJECT_RULES.md` chain.
+3. Full shared design documents are not mirrored into every application repository.
+4. App repositories must not independently redesign a shared family / visual standard; shared changes return to AITeam first.
+5. App-specific permanent exceptions belong in that app's sole `PROJECT_RULES.md`.
 
-This keeps AITeam as the single visual source of truth without creating another governance layer or a large mirrored documentation tree in every repository.
+This keeps AITeam as the single visual source of truth without creating a fourth governance layer.
 
-## Packages
+## Canonical packages
 
-- `icon-family/` — CY Windows desktop application icon family, shared master/reference material, and app-specific production exports.
-- `desktop/` — reserved for the CY Desktop Visual Guide after that guide is explicitly promoted to the shared canonical source.
+- `desktop/` — **canonical CY Desktop Visual Guide**, including Phase 1 shared UI direction and mature implementation references.
+- `icon-family/` — **canonical CY Windows desktop application icon family**, shared master plus app-specific production SVG / PNG / ICO assets.
 
-## Distribution model
+## Desktop Visual Guide
 
-For the icon family, AITeam owns the shared family source. After the full family is finalized, the AI responsible for each application should copy only that application's approved production icon assets into the target project and record the AITeam source revision in the implementation PR.
+Canonical guide:
 
-Examples:
+`desktop/CY_DESKTOP_VISUAL_GUIDE.md`
 
-- CYInvoice receives INV assets.
-- CYAccounting receives ACC assets.
-- CYEnvelope receives ENV assets.
-- CYERPAutoInput receives Auto assets.
-- CYWatermark receives WM assets.
-- SMARTCOPIConverter receives CVT assets.
-- TriINVCalc receives CAL assets.
+The guide defines the shared CY desktop visual language, including:
 
-`DriveDownloader` is not part of the CY App Icon Family. `CYAccountingWeb` is not automatically covered by the Windows desktop icon production rules.
+- Modern Business Desktop / native-first direction;
+- typography and density hierarchy;
+- Blue / Teal / Coral / Apricot themes;
+- surface, spacing and alignment roles;
+- button, input, tabs, table/list, dialog and shell guidance;
+- accessibility baseline;
+- Grid Continuity requirement;
+- Phase 1 / Phase 2 boundary;
+- link to the canonical icon-family package.
+
+100% / 96 DPI integrated shell is accepted. 125% / 150% remains deferred and must not be described as validated until real acceptance exists.
+
+## Icon-family distribution model
+
+AITeam owns the family source. Each application should copy only its own approved production icon assets into the target project and record the AITeam source revision in the implementation PR.
+
+- CYInvoice → INV
+- CYAccounting → ACC
+- CYEnvelope → ENV
+- CYERPAutoInput → Auto
+- CYWatermark → WM
+- SMARTCOPIConverter → CVT
+- TriINVCalc → CAL
+
+`DriveDownloader` is not part of the CY App Icon Family. `CYAccountingWeb` is not automatically covered by the Windows desktop icon-production rules.
 
 ## Governance boundary
 
-These files document visual direction and production references. If they conflict with a higher-priority user instruction, project rule, repository policy, or shared repository rule, the higher-priority source wins.
+These files document the canonical visual source. Mandatory adoption is expressed by the governing repository / project rules, not by creating another rules layer.
+
+If a project-specific permanent exception is required, place it in that project's sole `PROJECT_RULES.md`. Higher-priority user instructions and existing governance precedence continue to apply.
