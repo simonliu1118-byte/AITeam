@@ -6,7 +6,7 @@
 
 - 本 repository 為 **Public、source-visible proprietary**。
 - Public visibility 不代表 open source；使用、修改、散布與商業權利以根 `LICENSE` 為準。
-- 本 repository 是目前治理體系的**共通規則母本 repository**；目前納管 repo 包含 `AITeam`、`CYapps`、`CYapps_pvt` 與個人用途的 `sandbox`。
+- 本 repository 是目前治理體系的**共通規則母本 repository**；目前納管 repo 包含 `AITeam`、`CYapps`、`CYapps_pvt`、`chihyuan` 與個人用途的 `sandbox`。
 
 ## 2. 共通規則母本責任
 
