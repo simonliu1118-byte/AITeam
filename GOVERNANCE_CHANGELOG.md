@@ -1,5 +1,12 @@
 # AITeam Governance Changelog
 
+## 2.7.2 — 2026/09/24
+
+- 正式將 `simonliu1118-byte/chihyuan-web` 納入 AITeam 共通治理體系與下游納管清單；原 `chihyuan-legacy-private` 僅保留舊 GAS prototype／歷史，不納入共通規則同步。
+- `chihyuan-web` 採用 AITeam Common Rules 2.6.0，使用 `main` 作正式基準，並以 repo-specific `REPO_POLICY.md`／root `PROJECT_RULES.md` 管理 Public Web 系統差異。
+- CY 共用視覺仍以 AITeam `shared/cy-visual/` 為 canonical source；`chihyuan-web` 為純 Web 系統，不自動採用 Windows Desktop Visual Guide 或 Windows icon-production 規則。未來若建立正式 shared Web visual package，依既有治理鏈宣告採用，不建立第四層規則。
+- 本次不修改 `REPOSITORY_RULES.md`、`COMMON_RULES_VERSION` 或 `COMMON_RULES_CHANGELOG.md`；共通規則版本仍為 2.6.0。
+
 ## 2.7.1 — 2026/09/13
 
 - AITeam Windows Build workflow 移除 `ready_for_review` 事件；Draft PR 從建立起即可正常驗收，切換 Ready 狀態不再額外重跑一次相同 Build／Test。
