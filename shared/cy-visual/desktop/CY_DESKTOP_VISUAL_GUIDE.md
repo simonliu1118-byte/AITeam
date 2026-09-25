@@ -479,9 +479,13 @@ Mature implementation reference: `reference/CY_UI_REFERENCE_CYINVOICE_TABLE.md`.
 
 # 11. Dialog / MessageBox / Status
 
-## 11.1 Dialog shell — `CORE — ADVISORY`
+## 11.1 Dialog shell — `CORE`
 
 - native title bar / window behavior first;
+- the main application window carries the app's canonical family icon;
+- secondary dialogs, management windows and settings windows opened from the main application do **not** repeat the app icon in their title bar;
+- suppress the secondary-window app icon through the framework / OS-supported window API when available; do not introduce borderless or custom chrome solely to hide an icon;
+- native MessageBox keeps the OS-provided semantic icon / shell behavior and is not subject to the secondary-dialog no-app-icon rule;
 - CY consistency applies to content typography / surface / inputs / buttons;
 - do not convert every dialog into borderless / custom chrome.
 
