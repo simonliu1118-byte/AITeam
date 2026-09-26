@@ -177,7 +177,14 @@ public sealed class MeetingService
             : Path.Combine(sandbox, project.RepoSubpath.Replace('/', Path.DirectorySeparatorChar));
 
         if (!Directory.Exists(_workingDirectory))
-            throw new DirectoryNotFoundException($"副本裡找不到專案目錄：{project.RepoSubpath}");
+        {
+            // 新專案的資料夾在 GitHub 上還沒有，就讓 AI 看整個 Repo 來討論——
+            // 新東西要放在哪、跟旁邊的專案怎麼配合，本來就是開會要談的。
+            if (!project.IsPendingCreation)
+                throw new DirectoryNotFoundException($"副本裡找不到專案目錄：{project.RepoSubpath}");
+            progress($"「{project.RepoSubpath}」是還沒建立的新專案，AI 會看整個 Repo 來討論。");
+            _workingDirectory = sandbox;
+        }
     }
 
     public async Task CleanupAsync()

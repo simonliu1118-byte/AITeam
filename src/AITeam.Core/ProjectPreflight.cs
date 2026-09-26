@@ -55,7 +55,15 @@ public static class ProjectPreflight
         }
 
         var projectDirectory = project.PhysicalPath;
-        if (!Directory.Exists(projectDirectory))
+        if (project.IsPendingCreation)
+        {
+            issues.Add(new PreflightIssue(
+                PreflightSeverity.Warning,
+                "這是新專案，資料夾還沒建立",
+                $"「{project.RepoSubpath}」在 GitHub 上還不存在。這次的任務會直接當成修改任務，"
+                + "一併建立資料夾與 VERSION 檔（開始前會問你要從哪一版開始），跟著這次的修改一起送 PR。"));
+        }
+        else if (!Directory.Exists(projectDirectory))
         {
             issues.Add(new PreflightIssue(
                 PreflightSeverity.Blocker,
@@ -63,9 +71,15 @@ public static class ProjectPreflight
                 $"Repo 裡找不到登錄的專案位置：{projectDirectory}。請到「管理專案」重新選擇目錄。"));
             return issues;
         }
-
-        var versionProblem = DescribeVersionFileProblem(projectDirectory);
-        if (versionProblem is not null)
+        else if (IsVersionFileMissing(projectDirectory))
+        {
+            issues.Add(new PreflightIssue(
+                PreflightSeverity.Warning,
+                "這個專案還沒有 VERSION 檔",
+                "如果這次是修改任務，開始前會問你要從哪一版開始，並跟著這次的修改一起建立 VERSION 檔。"
+                + "查詢類的需求不受影響。"));
+        }
+        else if (DescribeVersionFileProblem(projectDirectory) is { } versionProblem)
         {
             issues.Add(new PreflightIssue(
                 PreflightSeverity.Warning,
@@ -83,6 +97,47 @@ public static class ProjectPreflight
 
         return issues;
     }
+
+    // 用 Windows 的規則，而不是 Path.GetInvalidFileNameChars()——後者在 Linux 上只擋 / 和 \0，
+    // 測試在 Linux 跑會放過一堆在使用者電腦上根本建不出來的名字。
+    private static readonly char[] WindowsInvalidNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
+
+    private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    };
+
+    /// <summary>
+    /// 新資料夾的名稱能不能用。回傳 null 代表可以，否則回傳可以直接給使用者看的原因。
+    /// </summary>
+    public static string? DescribeFolderNameProblem(string? name, IEnumerable<string> existingSiblings)
+    {
+        var value = name ?? "";
+        if (value.Trim().Length == 0) return "請輸入資料夾名稱。";
+        if (value.Contains('/') || value.Contains('\\'))
+            return "一次只能建立一層資料夾；要建更深的，先選好上一層再按一次「＋ 新增資料夾」。";
+        if (value != value.Trim() || value.StartsWith('.') || value.EndsWith('.'))
+            return "資料夾名稱不能用空白或句點開頭、結尾。";
+        if (value.IndexOfAny(WindowsInvalidNameChars) >= 0 || value.Any(char.IsControl))
+            return "資料夾名稱不能包含這些符號：\\ / : * ? \" < > |";
+        if (WindowsReservedNames.Contains(value.Split('.')[0]))
+            return "這是 Windows 保留的名稱，不能拿來當資料夾名稱。";
+        if (existingSiblings.Any(s => s.Equals(value, StringComparison.OrdinalIgnoreCase)))
+            return "這一層已經有同名的資料夾了。";
+        return null;
+    }
+
+    /// <summary>
+    /// VERSION 檔是「根本不存在」，還是「存在但內容不對」？兩者處理方式不同：
+    /// 不存在可以問使用者要從哪一版開始、幫他建立；內容不對就不能亂猜，只能停下來。
+    /// </summary>
+    public static bool IsVersionFileMissing(string projectDirectory) =>
+        !File.Exists(Path.Combine(projectDirectory, VersionFileName));
+
+    /// <summary>使用者自己輸入的起始版號要是單純的 X.Y.Z，跟 VERSION 檔的規則一樣。</summary>
+    public static bool IsPlainVersion(string? text) => text is not null && PlainVersion.IsMatch(text.Trim());
 
     /// <summary>VERSION 檔沒問題時回傳 null，有問題時回傳可以直接顯示給使用者的原因。</summary>
     public static string? DescribeVersionFileProblem(string projectDirectory)

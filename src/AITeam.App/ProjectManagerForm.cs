@@ -34,6 +34,11 @@ public sealed class ProjectManagerForm : Form
     private readonly Button _saveButton = new();
     private readonly Button _removeButton = new();
     private readonly Button _newButton = new();
+    private readonly Button _newFolderButton = new();
+    // 使用者新開、GitHub 上還沒有的資料夾（Repo 內的相對路徑）。只記在這次編輯裡，
+    // 存檔時才變成專案的「待建立」標記。
+    private readonly HashSet<string> _newFolders = new(StringComparer.OrdinalIgnoreCase);
+    private string _newFoldersRepo = "";
 
     private ProjectEntry? _editing;
     private RepoTreeSnapshot? _snapshot;
@@ -419,7 +424,7 @@ public sealed class ProjectManagerForm : Form
 
     private Control BuildLocationSection()
     {
-        var card = MakeSectionCard(out var body, extraRows: 2);
+        var card = MakeSectionCard(out var body, extraRows: 3);
         card.Dock = DockStyle.Fill;
         card.Margin = new Padding(0, 12, 2, 0);
         body.RowStyles[body.RowCount - 1] = new RowStyle(SizeType.Percent, 100F);
@@ -427,8 +432,9 @@ public sealed class ProjectManagerForm : Form
         body.Controls.Add(SectionHeader(3, "專案在 Repo 內的位置"), 0, 0);
         body.Controls.Add(new Label
         {
-            Text = "整個 Repo 就是一個專案時，選「Repo 根目錄」。",
+            Text = "整個 Repo 就是一個專案時，選「Repo 根目錄」。要開新專案，先選好要放在哪一層底下，再按「＋ 新增資料夾」。",
             AutoSize = true,
+            MaximumSize = new Size(520, 0),
             ForeColor = SecondaryText,
             Font = new Font("Microsoft JhengHei UI", 8.5F),
             Margin = new Padding(0, 0, 0, 8)
@@ -443,6 +449,19 @@ public sealed class ProjectManagerForm : Form
         _selectedLabel.Margin = new Padding(0, 0, 0, 8);
         body.Controls.Add(_selectedLabel, 0, 2);
 
+        _newFolderButton.Text = "＋ 新增資料夾";
+        _newFolderButton.AutoSize = false;
+        _newFolderButton.Size = new Size(130, 30);
+        _newFolderButton.FlatStyle = FlatStyle.Flat;
+        _newFolderButton.FlatAppearance.BorderColor = BorderColor;
+        _newFolderButton.BackColor = Color.White;
+        _newFolderButton.ForeColor = Accent;
+        _newFolderButton.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold);
+        _newFolderButton.Margin = new Padding(0, 0, 0, 8);
+        _newFolderButton.Enabled = false;
+        _newFolderButton.Click += (_, _) => AddNewFolder();
+        body.Controls.Add(_newFolderButton, 0, 3);
+
         _tree.Dock = DockStyle.Fill;
         _tree.BorderStyle = BorderStyle.FixedSingle;
         _tree.HideSelection = false;
@@ -452,7 +471,7 @@ public sealed class ProjectManagerForm : Form
             _selectedSubpath = e.Node.Tag as string ?? "";
             RefreshSelectedLabel();
         };
-        body.Controls.Add(_tree, 0, 3);
+        body.Controls.Add(_tree, 0, 4);
 
         return card;
     }
@@ -604,6 +623,12 @@ public sealed class ProjectManagerForm : Form
         _selectedSubpath = entry.RepoSubpath ?? "";
         _repoInfo.Text = $"Repo：{entry.GitHubRepo}\r\n本機位置：{entry.PhysicalPath}";
         _tree.Nodes.Clear();
+        _newFolderButton.Enabled = false;
+        _newFolders.Clear();
+        _newFoldersRepo = entry.GitHubRepo;
+        // 還沒建立的新專案，重新載入 Repo 時樹上不會有它的資料夾（GitHub 上還沒有），
+        // 要記下來補回去，否則一存檔位置就被改成 Repo 根目錄了。
+        if (entry.IsPendingCreation) _newFolders.Add(_selectedSubpath.Trim('/'));
         _selectedLabel.Text = string.IsNullOrWhiteSpace(_selectedSubpath)
             ? "目前選擇：Repo 根目錄（按「載入 Repo」可重新選擇）"
             : $"目前選擇：{_selectedSubpath}（按「載入 Repo」可重新選擇）";
@@ -619,6 +644,9 @@ public sealed class ProjectManagerForm : Form
         _repoBox.Text = "";
         _repoInfo.Text = "";
         _tree.Nodes.Clear();
+        _newFolderButton.Enabled = false;
+        _newFolders.Clear();
+        _newFoldersRepo = "";
         _selectedSubpath = "";
         _removeButton.Enabled = false;
         RefreshSelectedLabel();
@@ -643,7 +671,15 @@ public sealed class ProjectManagerForm : Form
         SetBusy(true, "正在載入…");
         try
         {
-            _snapshot = await _git.LoadRemoteTreeAsync(repo, _cts.Token);
+            var snapshot = await _git.LoadRemoteTreeAsync(repo, _cts.Token);
+            _snapshot = snapshot;
+            if (!snapshot.GitHubRepo.Equals(_newFoldersRepo, StringComparison.OrdinalIgnoreCase))
+            {
+                _newFolders.Clear();
+                _newFoldersRepo = snapshot.GitHubRepo;
+            }
+            // 已經在 GitHub 上出現的資料夾就不再是「新」的了。
+            _newFolders.RemoveWhere(path => snapshot.Directories.Any(d => d.Trim('/').Equals(path, StringComparison.OrdinalIgnoreCase)));
             _repoBox.Text = _snapshot.GitHubRepo;
             _repoInfo.Text = $"Repo：{_snapshot.GitHubRepo}\r\n本機位置：{_snapshot.RepoPath}\r\n目錄來源：origin/{_snapshot.DefaultBranch}";
             BuildTree(_snapshot.Directories);
@@ -669,13 +705,57 @@ public sealed class ProjectManagerForm : Form
             var root = new TreeNode("Repo 根目錄") { Tag = "" };
             _tree.Nodes.Add(root);
             foreach (var path in directories) AddTreePath(root, path);
+            foreach (var path in _newFolders) MarkAsNew(AddTreePath(root, path));
             root.Expand();
             SelectTreePath(_selectedSubpath);
         }
         finally { _tree.EndUpdate(); }
+        _newFolderButton.Enabled = true;
     }
 
-    private static void AddTreePath(TreeNode root, string path)
+    private static void MarkAsNew(TreeNode node)
+    {
+        var name = (node.Tag as string ?? "").Split('/').Last();
+        node.Text = name + "（新）";
+        node.ForeColor = Accent;
+    }
+
+    /// <summary>
+    /// 在目前選到的那一層底下開一個新資料夾。只是先登記，真正建立在第一次修改任務時，
+    /// 跟著那次的修改一起送 PR——git 不保存空資料夾，而且對 Repo 的改動都要走 PR。
+    /// </summary>
+    private void AddNewFolder()
+    {
+        if (_snapshot is null || _tree.Nodes.Count == 0)
+        {
+            MessageBox.Show("請先按「載入 Repo」。", "AITeam", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var parent = _tree.SelectedNode ?? _tree.Nodes[0];
+        var parentPath = parent.Tag as string ?? "";
+        var siblings = parent.Nodes.Cast<TreeNode>()
+            .Select(n => (n.Tag as string ?? "").Split('/').Last())
+            .ToList();
+
+        using var dialog = new NewFolderDialog(
+            parentPath.Length == 0 ? "Repo 根目錄" : parentPath,
+            name => ProjectPreflight.DescribeFolderNameProblem(name, siblings));
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        var path = parentPath.Length == 0 ? dialog.FolderName : parentPath + "/" + dialog.FolderName;
+        _newFolders.Add(path);
+        _newFoldersRepo = _snapshot.GitHubRepo;
+
+        var node = new TreeNode { Tag = path };
+        MarkAsNew(node);
+        parent.Nodes.Add(node);
+        parent.Expand();
+        _tree.SelectedNode = node;
+        node.EnsureVisible();
+    }
+
+    private static TreeNode AddTreePath(TreeNode root, string path)
     {
         var current = root;
         var accumulated = new List<string>();
@@ -690,6 +770,7 @@ public sealed class ProjectManagerForm : Form
             }
             current = next;
         }
+        return current;
     }
 
     private void SelectTreePath(string subpath)
@@ -734,7 +815,9 @@ public sealed class ProjectManagerForm : Form
             var fullPath = string.IsNullOrWhiteSpace(subpath)
                 ? _snapshot.RepoPath
                 : Path.Combine(_snapshot.RepoPath, subpath.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(fullPath))
+            // 使用者剛新開的資料夾本來就還不存在；其他情況找不到目錄就是真的有問題。
+            var isNewFolder = _newFolders.Contains(subpath) && !Directory.Exists(fullPath);
+            if (!isNewFolder && !Directory.Exists(fullPath))
                 throw new InvalidOperationException($"同步後找不到所選專案目錄：{subpath}");
 
             var entry = new ProjectEntry
@@ -748,6 +831,7 @@ public sealed class ProjectManagerForm : Form
                 GitHubRepo = _snapshot.GitHubRepo,
                 DefaultBranch = branch,
                 Active = true,
+                PendingCreation = isNewFolder ? true : null,
                 Extra = _editing?.Extra
             };
 
@@ -795,6 +879,7 @@ public sealed class ProjectManagerForm : Form
         _newButton.Enabled = !busy;
         _projectList.Enabled = !busy;
         _removeButton.Enabled = !busy && _editing is not null;
+        _newFolderButton.Enabled = !busy && _tree.Nodes.Count > 0;
         _loadButton.Text = loadText;
         UseWaitCursor = busy;
     }
@@ -803,7 +888,9 @@ public sealed class ProjectManagerForm : Form
     {
         _selectedLabel.Text = string.IsNullOrWhiteSpace(_selectedSubpath)
             ? "目前選擇：Repo 根目錄"
-            : $"目前選擇：{_selectedSubpath}";
+            : _newFolders.Contains(_selectedSubpath.Trim('/'))
+                ? $"目前選擇：{_selectedSubpath}（新資料夾，第一次修改任務時建立）"
+                : $"目前選擇：{_selectedSubpath}";
     }
 
     private static Label MakeFieldLabel(string text) => new()

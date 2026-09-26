@@ -42,8 +42,22 @@ public sealed class ProjectEntry
     [JsonPropertyName("active")]
     public bool? Active { get; set; } = true;
 
+    /// <summary>
+    /// 使用者在「管理專案」裡新開的資料夾，GitHub 上還沒有。第一次修改任務會把它連同
+    /// VERSION 檔一起建立、送 PR；合併之後資料夾就真的存在，這個標記也就自然失效。
+    /// 只有明確標記過的專案才會被當成「待建立」——一個原本存在、後來被刪掉或改名的
+    /// 專案目錄，絕對不能被悄悄地重新建立。
+    /// </summary>
+    [JsonPropertyName("pending_creation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PendingCreation { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    /// <summary>標記為待建立，而且預設分支上確實還沒有這個資料夾。</summary>
+    [JsonIgnore]
+    public bool IsPendingCreation => PendingCreation == true && !Directory.Exists(PhysicalPath);
 
     [JsonIgnore]
     public string PhysicalPath =>

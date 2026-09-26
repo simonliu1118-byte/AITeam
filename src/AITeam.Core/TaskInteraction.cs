@@ -108,11 +108,19 @@ public enum MergeDecision
 /// 一次任務裡「使用者怎麼參與」的設定，集中成一個物件傳，
 /// 免得每加一個互動方式就要在好幾層方法上多掛一個參數。
 /// </summary>
+/// <summary>
+/// 專案還沒有 VERSION 檔時，問使用者要從哪一版開始。版號的第一碼依共用規則是使用者的決定，
+/// 所以不能由 AITeam 自己挑一個數字寫進去。
+/// </summary>
+public sealed record StartingVersionPrompt(string ProjectName, bool IsNewProject);
+
 public sealed record TaskInteraction(
     TaskNoteBoard Notes,
     bool PauseAfterImplement,
     Func<CheckpointPrompt, CancellationToken, Task<CheckpointResponse>> AskCheckpoint,
-    Func<MergeApprovalPrompt, CancellationToken, Task<MergeDecision>> AskMergeApproval)
+    Func<MergeApprovalPrompt, CancellationToken, Task<MergeDecision>> AskMergeApproval,
+    // 回傳 null 代表使用者不想現在決定，任務就此停下。沒有提供這個問法時維持舊行為：直接擋下。
+    Func<StartingVersionPrompt, CancellationToken, Task<string?>>? AskStartingVersion = null)
 {
     public static TaskInteraction None { get; } = new(
         new TaskNoteBoard(),
