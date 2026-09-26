@@ -266,6 +266,73 @@ public sealed class MeetingService
         "還沒決定的事："
     };
 
+    /// <summary>
+    /// 定案書裡的一段。Heading 為空代表這一段沒有標題——AI 沒照格式寫，或者那根本不是
+    /// 定案書（未收斂的討論摘要）。這種時候整份當成一段，不要把內容弄丟。
+    /// </summary>
+    public sealed record DecisionSection(string Heading, string Body);
+
+    /// <summary>
+    /// 把定案書切成一段一段，讓畫面可以一段一張卡給人看、給人改。
+    ///
+    /// 用「標題出現在整份文字的哪個位置」來切，而不是逐行比對：AI 常常把標題跟內容寫在
+    /// 同一行（「要做什麼：針對…」），逐行比對會整段抓不到。順便容忍 Markdown 的
+    /// ## 與 **，因為它也常自己加上去。
+    /// </summary>
+    public static IReadOnlyList<DecisionSection> SplitDecision(string text)
+    {
+        var normalized = (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+
+        var marks = new List<(int Index, string Heading)>();
+        foreach (var section in DecisionSections)
+        {
+            var from = 0;
+            while (from < normalized.Length)
+            {
+                var at = normalized.IndexOf(section, from, StringComparison.Ordinal);
+                if (at < 0) break;
+                marks.Add((at, section));
+                from = at + section.Length;
+            }
+        }
+
+        // 一個標題都沒有（未收斂的討論摘要，或 AI 完全沒照格式寫）：整份當成一段，
+        // 絕對不要因為認不得格式就把內容弄丟。
+        if (marks.Count == 0)
+            return new List<DecisionSection> { new("", CleanSection(normalized)) };
+
+        marks.Sort((a, b) => a.Index.CompareTo(b.Index));
+
+        var sections = new List<DecisionSection>();
+        var lead = CleanSection(normalized[..marks[0].Index]);
+        if (lead.Length > 0) sections.Add(new DecisionSection("", lead));
+
+        for (var i = 0; i < marks.Count; i++)
+        {
+            var bodyStart = marks[i].Index + marks[i].Heading.Length;
+            var bodyEnd = i + 1 < marks.Count ? marks[i + 1].Index : normalized.Length;
+            sections.Add(new DecisionSection(marks[i].Heading, CleanSection(normalized[bodyStart..bodyEnd])));
+        }
+
+        return sections;
+    }
+
+    /// <summary>把（可能被使用者改過的）各段接回一份文字，這才是真正送給 Planner 的東西。</summary>
+    public static string JoinDecision(IEnumerable<DecisionSection> sections) =>
+        string.Join(
+            Environment.NewLine + Environment.NewLine,
+            sections
+                .Select(s => s.Heading.Length == 0 ? s.Body.Trim() : s.Heading + Environment.NewLine + s.Body.Trim())
+                .Where(text => text.Trim().Length > 0));
+
+    private static string CleanSection(string value)
+    {
+        var text = value.Replace("\n", Environment.NewLine).Trim();
+        while (text.Length > 0 && (text[0] == '*' || text[0] == '#')) text = text[1..].TrimStart();
+        while (text.Length > 0 && (text[^1] == '*' || text[^1] == '#')) text = text[..^1].TrimEnd();
+        return text;
+    }
+
     internal static string BuildDecisionPrompt(
         ProviderId writer,
         MeetingSetup setup,

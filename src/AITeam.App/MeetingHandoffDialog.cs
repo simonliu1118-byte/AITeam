@@ -18,8 +18,12 @@ public sealed class MeetingHandoffDialog : Form
 
     private readonly ComboBox _projectBox = new();
     private readonly TextBox _requestBox = new();
-    private readonly TextBox _conclusionBox = new();
     private readonly Button _manageButton = new();
+    private readonly FlowLayoutPanel _sectionStack = new();
+    private readonly List<SectionCard> _cards = new();
+
+    /// <summary>定案書的一段＝畫面上的一張卡。Heading 保留原文，接回去時要用。</summary>
+    private sealed record SectionCard(string Heading, RoundedCard Card, TextBox Box);
 
     private IReadOnlyList<ProjectEntry> _projects;
 
@@ -38,8 +42,8 @@ public sealed class MeetingHandoffDialog : Form
 
         Text = "AITeam - 把會議結論送去執行";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(700, 560);
-        Size = new Size(760, 620);
+        MinimumSize = new Size(780, 600);
+        Size = new Size(940, 800);
         Font = new Font("Microsoft JhengHei UI", 10F);
         BackColor = AppBackground;
         Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -60,10 +64,13 @@ public sealed class MeetingHandoffDialog : Form
             BackColor = AppBackground
         };
         shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (var i = 0; i < 4; i++) shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 120F));
-        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));            // 標題
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));            // 專案
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));            // 需求標籤
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 64F));       // 需求
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));            // 結論標籤
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));       // 結論（一段一張卡）
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));            // 按鈕
         Controls.Add(shell);
 
         shell.Controls.Add(new Label
@@ -102,6 +109,8 @@ public sealed class MeetingHandoffDialog : Form
 
         FillProjects(conclusion.ProjectName);
 
+        // 標籤跟它說明的那個框要相鄰。以前標籤放第 2、3 列、框放第 4、5 列，
+        // 畫面上就變成「兩行標籤疊在一起，底下才是兩個框」，根本看不出誰對應誰。
         shell.Controls.Add(MakeFieldLabel("要送出的需求（可以改寫成更明確的一句話）"), 0, 2);
 
         _requestBox.Dock = DockStyle.Fill;
@@ -112,32 +121,20 @@ public sealed class MeetingHandoffDialog : Form
         // 以前這裡直接塞整份結論，但結論本來就會當成背景一起送過去——
         // 等於同一段話讓 Planner 讀兩次。需求欄留一句短的就好，該說的在下面那份。
         _requestBox.Text = $"依照下面這份會議結論執行：{conclusion.Topic}";
-        shell.Controls.Add(_requestBox, 0, 4);
+        shell.Controls.Add(_requestBox, 0, 3);
 
-        shell.Controls.Add(MakeFieldLabel(DescribeConclusion(conclusion)), 0, 3);
+        shell.Controls.Add(MakeFieldLabel(DescribeConclusion(conclusion)), 0, 4);
 
-        var card = new RoundedCard
-        {
-            Dock = DockStyle.Fill,
-            BackColor = CardBackground,
-            BorderColor = BorderColor,
-            Radius = 10,
-            Padding = new Padding(11),
-            Margin = new Padding(0, 4, 0, 12)
-        };
-        _conclusionBox.Multiline = true;
-        // 這一份才是真正交給改程式的 AI 的東西，所以要讓使用者能當場改：
-        // 刪掉不同意的、補上自己的決定。送出去的就是他看過並改過的版本。
-        _conclusionBox.ReadOnly = false;
-        _conclusionBox.BorderStyle = BorderStyle.None;
-        _conclusionBox.BackColor = CardBackground;
-        _conclusionBox.ForeColor = Color.FromArgb(55, 62, 70);
-        _conclusionBox.ScrollBars = ScrollBars.Vertical;
-        _conclusionBox.Dock = DockStyle.Fill;
-        _conclusionBox.Font = new Font("Microsoft JhengHei UI", 9F);
-        _conclusionBox.Text = conclusion.Text;
-        card.Controls.Add(_conclusionBox);
-        shell.Controls.Add(card, 0, 5);
+        _sectionStack.Dock = DockStyle.Fill;
+        _sectionStack.FlowDirection = FlowDirection.TopDown;
+        _sectionStack.WrapContents = false;
+        _sectionStack.AutoScroll = true;
+        _sectionStack.BackColor = AppBackground;
+        _sectionStack.Margin = new Padding(0, 4, 0, 12);
+        _sectionStack.Resize += (_, _) => LayOutCards();
+        shell.Controls.Add(_sectionStack, 0, 5);
+
+        BuildSectionCards(conclusion);
 
         var buttons = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -202,7 +199,9 @@ public sealed class MeetingHandoffDialog : Form
             return;
         }
 
-        var conclusion = _conclusionBox.Text.Trim();
+        var conclusion = MeetingService
+            .JoinDecision(_cards.Select(c => new MeetingService.DecisionSection(c.Heading, c.Box.Text)))
+            .Trim();
         if (conclusion.Length == 0)
         {
             MessageBox.Show("會議結論不能是空的——那是接手的 AI 唯一看得到的背景。",
@@ -215,6 +214,88 @@ public sealed class MeetingHandoffDialog : Form
         Conclusion = conclusion;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    /// <summary>
+    /// 一段一張卡。以前整份定案書塞在同一個框裡，五段黏成一大坨，人根本讀不下去——
+    /// 那份文字是要給 Planner 吃的沒錯，但這個畫面是要給人看的。
+    /// </summary>
+    private void BuildSectionCards(MeetingConclusion conclusion)
+    {
+        var fallbackHeading = conclusion.Kind == MeetingConclusionKind.Decision ? "定案書內容" : "會議摘要";
+
+        foreach (var section in MeetingService.SplitDecision(conclusion.Text))
+        {
+            var card = new RoundedCard
+            {
+                BackColor = CardBackground,
+                BorderColor = BorderColor,
+                Radius = 10,
+                Padding = new Padding(14, 12, 14, 12),
+                Margin = new Padding(0, 0, 0, 10),
+                Height = 120
+            };
+
+            var box = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                // 這一份才是真正交給改程式的 AI 的東西，所以要讓使用者能當場改：
+                // 刪掉不同意的、補上自己的決定。送出去的就是他看過並改過的版本。
+                ReadOnly = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = CardBackground,
+                ForeColor = Color.FromArgb(55, 62, 70),
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Microsoft JhengHei UI", 9.5F),
+                // WinForms 的 TextBox 只認 \r\n；AI 吐出來的是 \n，直接塞進去
+                // 所有換行都會不見，整份變成一大段。
+                Text = section.Body.Replace("\r\n", "\n").Replace("\n", Environment.NewLine)
+            };
+
+            var heading = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 24,
+                Text = section.Heading.Length > 0 ? section.Heading.TrimEnd('：') : fallbackHeading,
+                Font = new Font("Microsoft JhengHei UI", 10F, FontStyle.Bold),
+                ForeColor = Accent,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            // 停靠的順序有講究：後加入的先搶空間，所以要填滿的先加、標題後加。
+            card.Controls.Add(box);
+            card.Controls.Add(heading);
+
+            _sectionStack.Controls.Add(card);
+            _cards.Add(new SectionCard(section.Heading, card, box));
+        }
+
+        LayOutCards();
+    }
+
+    /// <summary>
+    /// 每張卡的寬度跟著視窗，高度跟著內容——短的段落不要留一大片空白，
+    /// 長的也不要無止盡地長下去（超過上限就讓那張卡自己捲）。
+    /// </summary>
+    private void LayOutCards()
+    {
+        if (_cards.Count == 0) return;
+
+        var width = Math.Max(240, _sectionStack.ClientSize.Width - 12);
+        _sectionStack.SuspendLayout();
+        foreach (var (_, card, box) in _cards)
+        {
+            card.Width = width;
+            var textWidth = Math.Max(120, width - card.Padding.Horizontal);
+            var measured = TextRenderer.MeasureText(
+                box.Text.Length == 0 ? " " : box.Text,
+                box.Font,
+                new Size(textWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+            card.Height = card.Padding.Vertical + 24 + Math.Clamp(measured.Height + 10, 44, 300);
+        }
+        _sectionStack.ResumeLayout();
     }
 
     /// <summary>
