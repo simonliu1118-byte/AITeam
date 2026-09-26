@@ -801,7 +801,7 @@ public sealed class MainWindow : Form
     /// 一併交給 AI 的背景（會議結論）。它只影響送給 AI 的內容，不會顯示在「目前任務」裡——
     /// 那一格要留給使用者自己講的那句需求。
     /// </param>
-    private async Task HandleSendAsync(string? presetRequest = null, string? background = null)
+    private async Task HandleSendAsync(string? presetRequest = null, string? background = null, bool knownChange = false)
     {
         if (presetRequest is null && string.IsNullOrWhiteSpace(_requestBox.Text)) return;
         if (_taskRunning)
@@ -847,7 +847,8 @@ public sealed class MainWindow : Form
                 ReportStage,
                 ReportActivity,
                 interaction,
-                _taskCts.Token);
+                _taskCts.Token,
+                knownChange);
 
             if (result.Intent == RequestIntent.Change && result.Change is { } change)
             {
@@ -1323,7 +1324,8 @@ public sealed class MainWindow : Form
         SelectProject(dialog.Project.Name);
         // 送出去的是使用者在交接視窗裡看過、也可能改過的那一份，不是會議自己產生的原文。
         var agreed = conclusion with { Text = dialog.Conclusion };
-        await HandleSendAsync(dialog.Request, agreed.ComposeBackground());
+        // 「送去執行」本身就是明確的修改要求，不再讓 AI 猜是不是查詢。
+        await HandleSendAsync(dialog.Request, agreed.ComposeBackground(), knownChange: true);
     }
 
     private void SelectProject(string name)

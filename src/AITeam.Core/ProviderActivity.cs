@@ -50,6 +50,10 @@ public static class ProviderActivity
         if (text.All(c => c is '-' or '=' or '_' or '*' or '.' or '~' or '─' or '━')) return null;
         if (text.StartsWith("[2K", StringComparison.Ordinal)) return null;
         if (IsStackNoise(text)) return null;
+        // 出現「�」代表這一行根本不是 UTF-8：通常是 Codex 在轉述它用 PowerShell 跑出來的結果，
+        // 而 Windows 上的 PowerShell 用的是繁中舊編碼（CP950），中文會整串變成亂碼。
+        // 那種行本來就只是「搜尋結果第幾行」之類的東西，不值得顯示；最後的答案不受影響。
+        if (text.Contains('\uFFFD')) return null;
 
         return Shorten(text);
     }
