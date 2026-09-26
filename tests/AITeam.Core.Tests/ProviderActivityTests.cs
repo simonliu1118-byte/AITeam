@@ -89,4 +89,18 @@ public sealed class ProviderActivityTests
         Assert.True(described!.Length <= 121);
         Assert.EndsWith("…", described);
     }
+
+    [Fact]
+    public void MisEncodedToolOutput_IsHiddenInsteadOfShownAsGarbage()
+    {
+        // 實際在畫面上出現過的樣子：PowerShell 用繁中舊編碼（CP950）輸出的中文，
+        // 被當成 UTF-8 讀進來，每個中文字都變成「�」。
+        Assert.Null(ProviderActivity.Describe(ProviderId.Codex, "\uFFFD\uFFFD\uFFFD \uFFFDu\uFFFD\uFFFD:2 \uFFFDr\uFFFD\uFFFD:1"));
+    }
+
+    [Fact]
+    public void ProperChinese_IsStillShown()
+    {
+        Assert.Equal("正在讀取專案", ProviderActivity.Describe(ProviderId.Codex, "正在讀取專案"));
+    }
 }

@@ -120,7 +120,7 @@ public sealed class MeetingHandoffDialog : Form
         _requestBox.Margin = new Padding(0, 4, 0, 12);
         // 以前這裡直接塞整份結論，但結論本來就會當成背景一起送過去——
         // 等於同一段話讓 Planner 讀兩次。需求欄留一句短的就好，該說的在下面那份。
-        _requestBox.Text = $"依照下面這份會議結論執行：{conclusion.Topic}";
+        _requestBox.Text = DefaultRequest(conclusion);
         shell.Controls.Add(_requestBox, 0, 3);
 
         shell.Controls.Add(MakeFieldLabel(DescribeConclusion(conclusion)), 0, 4);
@@ -214,6 +214,21 @@ public sealed class MeetingHandoffDialog : Form
         Conclusion = conclusion;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    /// <summary>
+    /// 需求欄的預設文字要是一句「去做什麼」。以前填的是會議題目，但題目常常是問句
+    /// （「API 要怎麼取得？」），讀起來就像是在問問題，不像是要動手。
+    /// 有定案書就拿「要做什麼」那段，沒有才退回題目。
+    /// </summary>
+    private static string DefaultRequest(MeetingConclusion conclusion)
+    {
+        var what = MeetingService.SplitDecision(conclusion.Text)
+            .FirstOrDefault(s => s.Heading == "要做什麼：")?.Body.Trim();
+        if (!string.IsNullOrWhiteSpace(what))
+            return "依照下面的會議定案書修改專案：" + what.Replace("\r\n", " ").Replace("\n", " ");
+
+        return $"依照下面的會議討論結果修改專案（會議主題：{conclusion.Topic}）";
     }
 
     /// <summary>

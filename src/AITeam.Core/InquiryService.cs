@@ -57,7 +57,8 @@ public sealed class InquiryService
         Action<TaskProgress> onStage,
         Action<string> onActivity,
         TaskInteraction interaction,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool knownChange = false)
     {
         _onActivity = onActivity;
         _interaction = interaction;
@@ -66,6 +67,17 @@ public sealed class InquiryService
             throw new InvalidOperationException("目前沒有可用的 AI。請先重新檢查 AI 狀態。");
         if (!Directory.Exists(project.RepoPath))
             throw new DirectoryNotFoundException($"找不到專案 Repo：{project.RepoPath}");
+
+        // 使用者已經明講要改（例如在會議裡按「送去執行」），就不要再讓 AI 猜一次是不是查詢。
+        // 以前會議題目常是問句（「API 要怎麼取得？」），AI 看到問句就判成查詢，回答完就結束，
+        // 使用者按了「送去執行」卻什麼都沒改。
+        if (knownChange)
+        {
+            progress("這是你明確要求執行的任務，直接進入修改管線…");
+            return await DispatchChangeAsync(
+                project, request, candidates, askUser, progress, onStage, onActivity, interaction,
+                subject: "", cancellationToken);
+        }
 
         var sandboxRoot = Path.Combine(_runtimeRoot, "tasks", "inquiry-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.GetDirectoryName(sandboxRoot)!);
@@ -114,30 +126,9 @@ public sealed class InquiryService
                     if (parsed.Intent == RequestIntent.Change)
                     {
                         progress("已辨識為修改任務，切換到完整多 AI 修改管線…");
-                        try
-                        {
-                            var change = await _changeTaskService.RunAsync(
-                                project,
-                                request,
-                                candidates,
-                                askUser,
-                                progress,
-                                onStage,
-                                onActivity,
-                                interaction,
-                                cancellationToken);
-
-                            var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";
-                            return new InquiryResult(RequestIntent.Change, change.FinalReviewer, summary, change, parsed.Subject);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch (Exception ex)
-                        {
-                            throw new ChangePipelineDispatchException(ex.Message, ex);
-                        }
+                        return await DispatchChangeAsync(
+                            project, request, candidates, askUser, progress, onStage, onActivity, interaction,
+                            parsed.Subject, cancellationToken);
                     }
 
                     return parsed;
@@ -174,6 +165,44 @@ public sealed class InquiryService
                 if (Directory.Exists(sandboxRoot)) Directory.Delete(sandboxRoot, true);
             }
             catch { }
+        }
+    }
+
+    private async Task<InquiryResult> DispatchChangeAsync(
+        ProjectEntry project,
+        string request,
+        IReadOnlyList<ProviderId> candidates,
+        Func<PlanGatePrompt, CancellationToken, Task<PlanGateResponse>> askUser,
+        Action<string> progress,
+        Action<TaskProgress> onStage,
+        Action<string> onActivity,
+        TaskInteraction interaction,
+        string subject,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var change = await _changeTaskService.RunAsync(
+                project,
+                request,
+                candidates,
+                askUser,
+                progress,
+                onStage,
+                onActivity,
+                interaction,
+                cancellationToken);
+
+            var summary = $"{change.Summary}\r\nRisk：{change.Risk}\r\nImplementer：{change.Implementer.ToFriendlyName()}\r\nFinal Review：{change.FinalReviewer.ToFriendlyName()}";
+            return new InquiryResult(RequestIntent.Change, change.FinalReviewer, summary, change, subject);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ChangePipelineDispatchException(ex.Message, ex);
         }
     }
 
