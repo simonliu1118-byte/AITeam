@@ -58,8 +58,69 @@ public sealed class ProjectPreflightTests : IDisposable
     {
         var issues = ProjectPreflight.Inspect(Project(), 3);
 
-        var version = Assert.Single(issues, i => i.Title.Contains("版本檔"));
+        var version = Assert.Single(issues, i => i.Title.Contains("VERSION"));
         Assert.Equal(PreflightSeverity.Warning, version.Severity);
+        // 沒有 VERSION 不再是「修改任務會被擋下」——開工前會問使用者要從哪一版開始。
+        Assert.DoesNotContain("會被擋下", version.Title);
+    }
+
+    [Fact]
+    public void MalformedVersionFile_StillSaysChangesWillBeBlocked()
+    {
+        // 內容不對就不能亂猜，這個跟「根本沒有」不一樣。
+        File.WriteAllText(Path.Combine(_repo, "VERSION"), "1.2.3-beta");
+
+        var issue = Assert.Single(ProjectPreflight.Inspect(Project(), 3), i => i.Title.Contains("版本檔"));
+
+        Assert.Contains("會被擋下", issue.Title);
+    }
+
+    [Fact]
+    public void PendingNewProject_IsNotABlocker_EvenThoughItsFolderDoesNotExistYet()
+    {
+        var project = new ProjectEntry
+        {
+            Name = "New", RepoPath = _repo, RepoSubpath = "tools/new-app", PendingCreation = true
+        };
+
+        var issues = ProjectPreflight.Inspect(project, 3);
+
+        Assert.DoesNotContain(issues, i => i.Severity == PreflightSeverity.Blocker);
+        Assert.Contains(issues, i => i.Title.Contains("新專案"));
+    }
+
+    [Fact]
+    public void MissingFolder_WithoutThePendingMark_IsStillABlocker()
+    {
+        // 原本存在、後來被刪掉或改名的專案目錄，絕對不能被當成新專案悄悄重建。
+        var project = new ProjectEntry { Name = "Gone", RepoPath = _repo, RepoSubpath = "apps/gone" };
+
+        var issues = ProjectPreflight.Inspect(project, 3);
+
+        Assert.Contains(issues, i => i.Severity == PreflightSeverity.Blocker && i.Title.Contains("找不到專案目錄"));
+    }
+
+    [Fact]
+    public void PendingMark_StopsMatteringOnceTheFolderExists()
+    {
+        Directory.CreateDirectory(Path.Combine(_repo, "tools", "new-app"));
+        var project = new ProjectEntry
+        {
+            Name = "New", RepoPath = _repo, RepoSubpath = "tools/new-app", PendingCreation = true
+        };
+
+        Assert.False(project.IsPendingCreation);
+    }
+
+    [Theory]
+    [InlineData("0.1.0", true)]
+    [InlineData(" 1.0.0 ", true)]
+    [InlineData("1.0", false)]
+    [InlineData("v0.1.0", false)]
+    [InlineData("", false)]
+    public void StartingVersionTypedByTheUser_FollowsTheSameRuleAsTheVersionFile(string text, bool expected)
+    {
+        Assert.Equal(expected, ProjectPreflight.IsPlainVersion(text));
     }
 
     [Theory]

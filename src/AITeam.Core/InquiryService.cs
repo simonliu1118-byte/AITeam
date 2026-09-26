@@ -68,6 +68,13 @@ public sealed class InquiryService
         if (!Directory.Exists(project.RepoPath))
             throw new DirectoryNotFoundException($"找不到專案 Repo：{project.RepoPath}");
 
+        // 還沒建立的新專案沒有東西可以查，任何需求都是要把它做出來。
+        if (project.IsPendingCreation && !knownChange)
+        {
+            progress("這是還沒建立的新專案，沒有現成的內容可以查詢，直接進入修改管線…");
+            knownChange = true;
+        }
+
         // 使用者已經明講要改（例如在會議裡按「送去執行」），就不要再讓 AI 猜一次是不是查詢。
         // 以前會議題目常是問句（「API 要怎麼取得？」），AI 看到問句就判成查詢，回答完就結束，
         // 使用者按了「送去執行」卻什麼都沒改。

@@ -834,7 +834,7 @@ public sealed class MainWindow : Form
         _taskCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         _notes = new TaskNoteBoard();
         var interaction = new TaskInteraction(
-            _notes, _pauseAfterImplement.Checked, AskCheckpointAsync, AskMergeApprovalAsync);
+            _notes, _pauseAfterImplement.Checked, AskCheckpointAsync, AskMergeApprovalAsync, AskStartingVersionAsync);
 
         try
         {
@@ -1185,6 +1185,21 @@ public sealed class MainWindow : Form
     {
         using var dialog = new CheckpointDialog(prompt);
         return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Response : null;
+    }
+
+    /// <summary>專案還沒有 VERSION 檔時問起始版號。回傳 null 代表使用者不想現在做，任務就此停下。</summary>
+    private Task<string?> AskStartingVersionAsync(StartingVersionPrompt prompt, CancellationToken cancellationToken)
+    {
+        var version = InvokeRequired
+            ? (string?)Invoke(new Func<string?>(() => ShowStartingVersionDialog(prompt)))
+            : ShowStartingVersionDialog(prompt);
+        return Task.FromResult(version);
+    }
+
+    private string? ShowStartingVersionDialog(StartingVersionPrompt prompt)
+    {
+        using var dialog = new StartingVersionDialog(prompt);
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Version : null;
     }
 
     /// <summary>高風險變更的人工合併關卡，現在在 AITeam 裡完成，不必再開瀏覽器。</summary>

@@ -150,10 +150,32 @@ public sealed class ChangeTaskService
         // 修改任務最後一定要升版號，所以版本檔有問題就不可能完成。這件事以前是在
         // 升版號那一步才發現，那時候調查、規劃、實作、審查全跑完了，額度也燒掉了。
         // 現在在開任何工作區、派任何工作之前就先擋下來。
-        var versionProblem = ProjectPreflight.DescribeVersionFileProblem(project.PhysicalPath);
-        if (versionProblem is not null)
+        //
+        // 例外是「根本沒有 VERSION 檔」（新專案，或一直沒建過的舊專案）：這種情況問使用者要從
+        // 哪一版開始，然後跟著這次的修改一起建立。VERSION 內容不對就不能亂猜，照舊停下。
+        var isNewProject = project.IsPendingCreation;
+        string? startingVersion = null;
+        if (isNewProject || ProjectPreflight.IsVersionFileMissing(project.PhysicalPath))
+        {
+            if (interaction.AskStartingVersion is null)
+                throw new InvalidOperationException(
+                    "這個專案還沒有 VERSION 檔。修改任務一定會需要版號，因此在開始派工前就先停下來，不會白白消耗 AI 額度。");
+
+            startingVersion = await interaction.AskStartingVersion(
+                new StartingVersionPrompt(project.Name, isNewProject), cancellationToken);
+            if (!ProjectPreflight.IsPlainVersion(startingVersion))
+                throw new OperationCanceledException("使用者沒有決定起始版號，任務不開始。");
+
+            startingVersion = startingVersion!.Trim();
+            progress(isNewProject
+                ? $"新專案：這次會建立「{project.RepoSubpath}」資料夾，VERSION 從 {startingVersion} 開始。"
+                : $"這個專案還沒有 VERSION 檔，依你的決定從 {startingVersion} 開始，跟著這次的修改一起建立。");
+        }
+        else if (ProjectPreflight.DescribeVersionFileProblem(project.PhysicalPath) is { } versionProblem)
+        {
             throw new InvalidOperationException(
                 versionProblem + " 修改任務一定會需要升版號，因此在開始派工前就先停下來，不會白白消耗 AI 額度。");
+        }
 
         var taskId = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6];
         var worktreesRoot = Path.Combine(_runtimeRoot, "worktrees");
@@ -181,8 +203,7 @@ public sealed class ChangeTaskService
             var workingDirectory = string.IsNullOrWhiteSpace(project.RepoSubpath)
                 ? worktreeRoot
                 : Path.Combine(worktreeRoot, project.RepoSubpath.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(workingDirectory))
-                throw new DirectoryNotFoundException($"隔離工作區內找不到專案目錄：{project.RepoSubpath}");
+            PrepareProjectScaffold(workingDirectory, project, isNewProject, startingVersion);
 
             var hasCi = HasGitHubActionsWorkflows(worktreeRoot);
             var techStackHint = DetectTechStackHint(workingDirectory);
@@ -227,6 +248,7 @@ public sealed class ChangeTaskService
                     cancellationToken);
                 if (recreate.ExitCode != 0)
                     throw new InvalidOperationException("重新建立修改工作區失敗：" + FirstUsefulLine(recreate.StandardError, recreate.StandardOutput));
+                PrepareProjectScaffold(workingDirectory, project, isNewProject, startingVersion);
             }
 
             var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
@@ -357,7 +379,8 @@ public sealed class ChangeTaskService
                 bump = confirmedBump;
             }
 
-            var (newVersion, tag) = await BumpVersionAsync(project, workingDirectory, bump, cancellationToken);
+            var (newVersion, tag) = await BumpVersionAsync(
+                project, workingDirectory, bump, firstRelease: startingVersion is not null, cancellationToken);
             progress($"版本：{newVersion}（未來正式發布時建議的 tag：{tag}，本次不會自動建立）");
 
             await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
@@ -815,10 +838,33 @@ public sealed class ChangeTaskService
             : result.StandardOutput.Trim();
     }
 
+    /// <summary>
+    /// 新專案的資料夾在 GitHub 上還不存在，要在工作區裡先建好；沒有 VERSION 檔的專案，
+    /// 用使用者決定的起始版號建立一份。兩者都會跟著這次的修改一起進 PR。
+    /// 不是新專案卻找不到目錄，代表原本的目錄被刪掉或改名了——那要停下來，不能悄悄重建。
+    /// </summary>
+    internal static void PrepareProjectScaffold(
+        string workingDirectory, ProjectEntry project, bool isNewProject, string? startingVersion)
+    {
+        if (!Directory.Exists(workingDirectory))
+        {
+            if (!isNewProject)
+                throw new DirectoryNotFoundException($"隔離工作區內找不到專案目錄：{project.RepoSubpath}");
+            Directory.CreateDirectory(workingDirectory);
+        }
+
+        if (startingVersion is null) return;
+
+        var versionPath = Path.Combine(workingDirectory, ProjectPreflight.VersionFileName);
+        if (!File.Exists(versionPath))
+            File.WriteAllText(versionPath, startingVersion + Environment.NewLine);
+    }
+
     private async Task<(string Version, string Tag)> BumpVersionAsync(
         ProjectEntry project,
         string workingDirectory,
         VersionBump bump,
+        bool firstRelease,
         CancellationToken cancellationToken)
     {
         // 開工前已經檢查過一次，這裡是最後一道防線：實作階段有可能把 VERSION 改壞或刪掉。
@@ -831,6 +877,10 @@ public sealed class ChangeTaskService
         var match = Regex.Match(current, "^(?<maj>\\d+)\\.(?<min>\\d+)\\.(?<pat>\\d+)$");
         if (!match.Success)
             throw new InvalidOperationException($"版本檔目前為「{current}」，不是單純 X.Y.Z。已停止正式化並保留工作區。");
+
+        // 第一次發行：VERSION 是這次才建立的，使用者決定的起始版號就是這一版，不再往上加。
+        var prefix = new string(project.Name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v";
+        if (firstRelease) return (current, prefix + current);
 
         var major = int.Parse(match.Groups["maj"].Value);
         var minor = int.Parse(match.Groups["min"].Value);
@@ -851,7 +901,6 @@ public sealed class ChangeTaskService
         var next = $"{major}.{minor}.{patch}";
         await File.WriteAllTextAsync(versionPath, next + Environment.NewLine, cancellationToken);
         // 依共用規則的 monorepo tag 慣例（<project>-vX.Y.Z）自動產生建議 tag，不再由使用者個別設定前綴。
-        var prefix = new string(project.Name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant() + "-v";
         return (next, prefix + next);
     }
 
@@ -1042,7 +1091,14 @@ public sealed class ChangeTaskService
             ? $"Project: {project.Name}"
             : $"Project: {project.Name}{Environment.NewLine}What this project is: {project.Description.Trim()}";
 
-        return $"{header}{Environment.NewLine}{RulesPointer}";
+        // 新專案要講清楚：不然 Scout 看到一個空資料夾，只會回報「什麼都沒有」。
+        var fresh = project.IsPendingCreation
+            ? $"{Environment.NewLine}This is a NEW project that does not exist yet. Its folder \"{project.RepoSubpath}\" "
+              + "is being created by this task and is empty apart from a VERSION file. Build it from scratch there, "
+              + "following the conventions used elsewhere in this repository."
+            : "";
+
+        return $"{header}{fresh}{Environment.NewLine}{RulesPointer}";
     }
 
     private static string BuildScoutPrompt(ProjectEntry project, string request) => $"""
