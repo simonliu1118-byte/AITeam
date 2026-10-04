@@ -1,5 +1,11 @@
 # AITeam Governance Changelog
 
+## 2.7.3 — 2026/10/04
+
+- Common Rules 升級至 2.8.0，將 2.7.0 的禁止版本殼原則補強為可執行的 Canonical Owner／Replacement／Architecture Exception 治理。
+- 明確要求架構修改辨識 State、Business/Mutation、Render、Lifecycle owner；替換實作原則上同 PR 移除舊路徑，暫時雙路徑必須有可驗證退場條件。
+- Observer、timer、wrapper、fallback、device-specific presentation 與 CSS override 改採 architecture review trigger，而非語法級全面禁止；CI 保護 ownership contract。
+
 ## 2.7.2 — 2026/09/24
 
 - 正式將 `simonliu1118-byte/chihyuan-web` 納入 AITeam 共通治理體系與下游納管清單；原 `chihyuan-legacy-private` 僅保留舊 GAS prototype／歷史，不納入共通規則同步。
