@@ -212,3 +212,86 @@ GitHub 公開摘要只列可公開的 Environment／Variable／Secret 名稱、s
 - 使用者決定晚間回家改用既有本地 MCP 連 Cloudflare。未讀取登入憑證或 Secret 值，未取得三 Repo Settings 實際名稱／權限清冊。
 - 本輪操作類型：GitHub source 唯讀＋AITeam 文件 PR。CYACC main auto-deploy source 保持原樣；live 設定／最新成功 run 尚未驗證。未建立、上傳或刪除任何遠端 Worker／Version；未改 Identity authority 或 CYInvoice 資料。
 - 下一個 Gate：依 6.4 取得受保護的實際清冊與匿名摘要，再更新 P1；不得把此輪文件準備誤作 P1/P2 完成。
+
+## 7. 本地 MCP 實際盤點 2026年10月12日
+
+### 7.1 P1 狀態與清冊範圍
+
+Cloudflare 本地 MCP 已成功取得目前可見帳號的資源清冊及活躍版本 metadata。**P1 仍為 BLOCKED**：GitHub Settings、資源 owner 的精確對照、Private Repo／外部部署依賴及完整回復風險仍有 UNKNOWN。P2 至 P7 的 Gate 維持不變。
+
+- 查詢時間：2026-10-12 21:34 至 21:48（Asia/Taipei）。Account 清單 1/1；Workers scripts 無 tag filter，回傳 5；D1 6/6；Custom Domain 2/2；Pages 0/0；可見 Zone 1/1、Worker routes 0。R2 bucket 清單回傳 2；API 未提供分頁欄位，因此範圍記為該次未篩選回應，不能推論其他帳號或 jurisdiction。
+- Active deployment 採各 Worker deployment 清單中 `created_on` 最新一筆，逐一查其版本 binding。5 個 Worker 均為單一版本 100% 流量，沒有使用「最新上傳版本」替代活躍版本。
+- CYapps main 已前進至 `daa12582990f729fd8f834826d492e58ed945802`；相對 6.1 基準新增一個 CYERPAutoInput commit，25 個 changed paths 未改動本次五條 Cloudflare workflow 或 CYID／CYInvoice／CYACC source。chihyuan-web、CYapps_PVT main 與 6.1 基準相同。
+- 公開摘要只保存 Alias、binding／Secret 名稱、type、存在狀態、數量與非敏比較；Worker 真名、D1 UUID、Workspace／Employee ID、Secret 值、業務明細及 R2 object keys／內容沒有寫入本文件。
+
+### 7.2 活躍資源與依賴
+
+下列用例分類結合名稱線索、runtime APP_ENV 與既有 source 責任；它們仍不是 GitHub Settings 內真實部署目標與 owner 的完整驗收。Owner Repo 欄沿用既有 source 的主責 repo，資源精確 owner／外部依賴待補。
+
+| 用例 Alias | Owner Repo | 活躍版本 metadata | D1／R2／Cron | Service Binding | Custom Domain | 保護與 UNKNOWN |
+| --- | --- | --- | --- | --- | --- | --- |
+| CYACC-P 候選 | CYapps | version number 219；100%；2026-10-12 11:09 啟用 | DB05；R2-01；`30 19 * * *` | `IDENTITY` → CYID-P 候選，default | 1 個 enabled | 保護正式帳務與自動部署；source SHA 精確對照、完整 recovery 待驗 |
+| CYID-D 候選 | CYapps | version number 122；100%；APP_ENV=development；2026-10-12 12:20 啟用 | DB03；無 R2 binding／Cron | 無 service binding | 0 | CY Web／CYInvoice 目前依賴；不可先退場 |
+| CYID-P 候選 | CYapps | version number 7；100%；APP_ENV=production；2026-09-30 18:39 啟用 | DB01；無 R2 binding／Cron | 無 service binding | 0 | CYACC 目前依賴；Named RPC 能力與跨環境權威差異待驗 |
+| CYINVOICE-EXISTING 候選 | CYapps | version number 94；100%；APP_ENV=development；CYID_ENABLED=true；2026-10-12 13:05 啟用 | DB06；無 R2 binding／Cron | `IDENTITY` → CYID-D 候選，default；`IDENTITY_AUTHORITY` → 同一 Provider，ConsumerAuthoritySync | 0 | 保護原業務 D1、Workspace／Device／Token 與歷史；本輪未讀資料明細 |
+| CYWEB-EXISTING 候選 | chihyuan-web | version number 50；100%；2026-10-12 10:59 啟用；SOURCE_VERSION=0.7.23 | DB04；無 R2 binding／Cron | `IDENTITY` → CYID-D 候選，default | 1 個 enabled | 業務服務仍活躍；backup 設定與部署輸入待核 |
+| DB02 | UNKNOWN | 未出現在本次 5 個活躍版本 D1 bindings | 獨立 D1；名稱僅提示 Identity development 類別 | UNKNOWN | 不適用 | PROTECT；其他版本、外部／手動用途與 owner 未完成核對 |
+| R2-02 | UNKNOWN | 未出現在本次 5 個活躍版本 R2 bindings | Bucket 名稱僅提示 CY Web 用途；object metadata count=0 | UNKNOWN | 無 custom domain；r2.dev disabled | PROTECT；無物件或活躍綁定不是可刪除證據 |
+| PVT-CLOUD-UNKNOWN | CYapps_PVT | 目前 5 個 Worker 清冊未能精確歸屬此 repo | UNKNOWN | UNKNOWN | UNKNOWN | 無 deploy workflow 不證明沒有手動管理資源 |
+| HISTORICAL-PROBE | UNKNOWN | 未從本次 Worker script 清單辨識獨立 probe；歷史版本不等於已清理 | UNKNOWN | UNKNOWN | UNKNOWN | 保留歷史限制；沒有建立、執行、上傳或刪除重試 |
+
+Identity D1（DB01／DB03）與三個 App 業務 D1（DB04／DB05／DB06）仍分離。6 個 D1 的 metadata 與當前 Time Travel bookmark 均可讀；bookmark 可取得不等於完整備份、指定歷史時間可回復或 restore drill 已通過，本輪沒有 restore／export／資料表查詢。
+
+兩套 CYID 的已上傳版本 metadata 已完整分頁核對：開發候選 122/122、正式候選 7/7，沒有 metadata 讀取失敗。DB02 未出現在這 129 個版本的 D1 binding 中；其他 Worker 歷史版本、dispatch namespace、外部使用及手動用途不在此項完成範圍。開發候選版本 118 至 122 的 metadata 可見 `ConsumerAuthoritySync`；正式候選 7 個版本均未見相同 export metadata。**未見 metadata 不能取代 deployed source 或實際 RPC contract 驗證**，因此 CYInvoice 不得依此直接切換 Provider。
+
+### 7.3 Requests 與備份現況
+
+Workers Observability log dataset 在 2026-10-11 21:35 至 2026-10-12 21:35（Asia/Taipei）回傳 0 logged events。另以 [Cloudflare GraphQL Workers Metrics](https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) 的 `workersInvocationsAdaptive` 在相同區間取得以下聚合；limit=100，回傳 5 個 scriptName groups，輸出前已轉為 Alias。這是 Adaptive Analytics 數字；errors 欄是該 dataset 的 Worker errors，不代表所有 HTTP／業務錯誤均為零。
+
+| 用例 Alias | GraphQL requests | Worker errors | subrequests |
+| --- | --- | --- | --- |
+| CYACC-P 候選 | 357 | 0 | 357 |
+| CYID-D 候選 | 415 | 0 | 1 |
+| CYID-P 候選 | 247 | 0 | 0 |
+| CYINVOICE-EXISTING 候選 | 913 | 0 | 329 |
+| CYWEB-EXISTING 候選 | 73 | 0 | 66 |
+| 合計 | 2005 | 0 | 753 |
+
+5 個 Worker 的 script-level observability config 均回傳 null、tail consumers=0、logpush=false；這些 metadata 與 log 查詢結果不構成無流量證據。是否需要新增觀測設定屬後續變更，本輪沒有啟用 logging 或讀取請求內容。
+
+- **CYACC／R2-01**：object metadata 完整單頁回傳 38 個物件、合計 4,244,005 bytes，最新 uploaded=2026-10-12 03:30:02（Asia/Taipei），與目前 Cron 時間相符。Lifecycle 有 enabled 的全 Bucket 45 日刪除規則，沒有 Bucket lock。這只證明物件與保留設定，不證明備份內容完整或可還原；GCS 相關 runtime Secret 名稱可見，不能證明實體 GCS Bucket、有效憑證或備份存在；GCS recovery UNKNOWN。
+- **CY Web／R2-02**：object metadata 完整單頁回傳 0 個物件；同樣有 enabled 的全 Bucket 45 日刪除規則，沒有 Bucket lock。活躍版本無 `BACKUP_R2`、`BACKUP_ENABLED`、`GCS_BUCKET`、`GCS_SERVICE_ACCOUNT_JSON`，沒有 Cron。依目前 `worker/backup/runtime.ts` 的啟用條件，這組活躍 binding 不會建立 backup service；是否原本刻意停用與 GitHub `CF_BACKUP_ENABLED`／`CF_BACKUP_SCHEDULE_ENABLED` 的實際值仍待確認，不自行啟用、補 Secret 或改排程。
+
+### 7.4 GitHub Settings 與 CYACC 自動部署
+
+GitHub connector 可讀三 Repo main 與既有 Actions run，但目前未見 Environment、Variable／Secret 名稱、Actions policy／default workflow permissions 的 callable reader。本機 GitHub CLI 既有登入無效，瀏覽器尚未登入；沒有讀取或重設 Token，也沒有新增權限。
+
+| 項目 | 實際可見證據 | 尚缺證據 |
+| --- | --- | --- |
+| 三 Repo main | branch summary 都回傳 `protected=false` | 詳細 branch protection；CYapps 查詢為 403 Resource not accessible by integration |
+| Public Repo rulesets | CYapps、chihyuan-web 的 repository rulesets 清單回傳空陣列 | 詳細有效保護與其他 scope 不由空清單推定 |
+| Private Repo rulesets | CYapps_PVT 查詢為 403；API 指出 feature 受 plan eligibility 限制 | Rulesets 狀態 UNKNOWN；不更改 visibility／plan |
+| Environment／Variables／Secrets | 尚無 Settings 名稱／scope 清冊 | Required reviewers、timer、branch／tag policies、bypass 與同名跨 scope |
+| 管理權限 | 既有 connector／MCP 成功的 GET 與唯讀 GraphQL query | Collaborator／App／Cloudflare Token 的完整 grants；成功讀取不證明寫入權限 |
+
+CYACC 最新已讀 main push run 為 [38198568768](https://github.com/simonliu1118-byte/CYapps/actions/runs/38198568768)，source SHA=`1f10193a7f09a8646ec8cf1300df12fdc05e1f20`，2026-10-12 11:08:17（Asia/Taipei）啟動；validate／deploy 與 production secure login entry、semantic frontend assets steps 均 success。Deploy step 的 11:08:56 至 11:09:03 區間包含目前活躍 deployment 的 11:09:00 建立時間，**僅有時間對應，尚未完成 source hash／artifact 與活躍版本的精確比對**。Workflow source 保留 main path push、自動 Validate → Deploy 與 `environment: development`，本次沒有 dispatch／rerun 或變更阻擋自動部署的設定。
+
+### 7.5 下一步與交接
+
+優先補 GitHub Settings 的實際名稱／scope／保護規則，以及 DB02、R2-02、Private／外部部署 owner。P1 Gate 通過後，P2 核對 CYID Named RPC 能力與 deployed source；P4 再整理正式部署目標與 per-App inputs。CY Web backup 是否啟用需先核對現有配置目的、備份憑證 owner 與回復要求。低流量、空 Bucket、名稱含 dev 或本次未見引用，均不得升格為資源刪除依據。
+
+~~~text
+日期／時區：2026-10-12 晚間／Asia/Taipei
+工作階段（P0 ~ P7）與狀態：P1 部分實際清冊已取得；BLOCKED，尚未通過 Gate
+Repository、branch、main SHA、PR：AITeam 文件 PR；基準 b24d8c22c445ee54dc1b532dfd93292764316eba；branch／PR 以本次 PR metadata 為準
+已讀取資料與來源：本地 Cloudflare MCP 的資源／Active Version／binding／Cron／R2 metadata、Time Travel bookmark；GitHub source／既有 Actions job summaries；無敏感值
+Cloudflare 資源：7.2 Alias 與依賴；5 Workers、6 D1、2 R2、2 Custom Domains；Pages 0
+實際完成操作：Cloudflare read-only GET／GraphQL query；AITeam 主控文件 PR
+CI／runtime read-back：CYACC 既有 run success；本文件 PR CI 以實際 checks 結果為準
+CYACCweb main 自動部署是否仍正常：已讀最新 main push run、deploy／smoke success；Settings 與精確 active source 對照待補；未變更
+是否建立遠端測試 Worker／Version：否；未執行 probe、刪除 retry 或遠端 migration
+CYID Authority／CYInvoice Workspace/Device/Data Continuity：只核對 Service Binding 目標／entrypoint 與 CYID_ENABLED；未讀資料明細，不宣稱 continuity 全部驗收
+阻擋原因／未驗證事項：GitHub Settings、完整 owner／外部依賴、deployed source、指定歷史 recovery／restore drill
+Recovery 前置條件：各 D1 可讀當前 bookmark；R2 metadata／lifecycle 已核；內容驗證、歷史回復時間與 GCS recovery UNKNOWN
+下一個 Gate／工作：補 P1 關鍵缺口，未通過前不推進 P2 至 P7 的變更
+~~~
