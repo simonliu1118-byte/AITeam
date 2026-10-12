@@ -118,6 +118,14 @@ Recovery 前置條件或參考（不含 Secret／ID）：
 下一個 Gate／工作：
 ~~~
 
+### 2026-10-12 15:36 (Asia/Taipei) — P1 唯讀連線再次受阻
+
+- 使用者已明確授權在需要時透過安全的瀏覽器互動自行登入 Cloudflare 與 GitHub；但**本次沒有進入登入階段**。Browser Use 回報 `insufficient_credits`，要求補充 Browser Use 專案額度，重試無效。**這不是驗證失敗、也不是缺少使用者登入授權。**
+- 上一輪無登入工作階段且瀏覽器導覽回報 `ERR_TUNNEL_CONNECTION_FAILED`。兩輪都**沒有讀到** Cloudflare Dashboard 的 Worker／D1 清單、Service Bindings／Metrics，也沒有讀到三個 Repo GitHub Settings 的 Environment、Secret/Variable 名稱或保護設定。
+- Source-only 的 GitHub workflow/設定引用仍有效，但不能當作目前雲端實體資源數量或 Settings 實際設定的證據。**P1 繼續 PENDING／BLOCKED ON LIVE READ ACCESS；P2～P7 不因此視為通過。**
+- 可接續路徑：獲得可用的唯讀瀏覽器工作階段、專案瀏覽器額度，或其他**受核准且不輸出 Secret**的唯讀管理 API／清單後，再補實際資源的匿名摘要。不得為查詢方便新建遠端測試 Worker、變更 Cloudflare Token 權限、觸發 Production Deploy，或要求使用者把登入資訊貼在 Chat。
+- 本次僅更新 AITeam 的跨 Repo 工作進度文件；CYACCweb `main` 自動部署與其他正式運作／GitHub Environment 完全未動。
+
 ### 2026-10-12 — 初始盤點與主控入口
 
 - 已確認 AITeam/CYapps/CYapps_PVT/chihyuan-web 的 COMMON_RULES_VERSION 都是 2.8.0。AITeam 是共通規則母本，但**本文件不修改共通規則**，也不新增另一層規則。
