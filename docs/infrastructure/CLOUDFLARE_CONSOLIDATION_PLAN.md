@@ -79,8 +79,8 @@
 
 | ID | 狀態 | 工作 | 驗證 Gate | 安全限制／回復 |
 | --- | --- | --- | --- | --- |
-| P0 | IN_PROGRESS | 在 AITeam 建立這份跨 Repo 主控文件及追蹤入口 | PR 只有 docs 修改，沒有更新產品版本／規則／Workflow／Secrets | 可撤回 PR，不影響現行部署 |
-| P1 | PENDING | Cloudflare **唯讀**取得 Worker/Active Version、Custom Domain、D1 Binding、R2、Cron、Service Binding、Requests；GitHub 三 Repo Environment 和 Variable/Secret **名稱**、scope、branch／approval rules | 每個活躍資源有 owner、引用、狀態與回復風險；查不到的標 UNKNOWN | 不顯示 Secret 值；不建立/刪除任何資源 |
+| P0 | DONE | 在 AITeam 建立這份跨 Repo 主控文件及追蹤入口 | PR 只有 docs 修改，沒有更新產品版本／規則／Workflow／Secrets | 可撤回 PR，不影響現行部署 |
+| P1 | BLOCKED | Cloudflare **唯讀**取得 Worker/Active Version、Custom Domain、D1 Binding、R2、Cron、Service Binding、Requests；GitHub 三 Repo Environment 和 Variable/Secret **名稱**、scope、branch／approval rules | 每個活躍資源有 owner、引用、狀態與回復風險；查不到的標 UNKNOWN | 不顯示 Secret 值；不建立/刪除任何資源 |
 | P2 | BLOCKED on P1 | 對照當前實際 deployed version、三 Repo main workflow、全部 Consumer Binding；修正清冊來源證據 | 清楚哪些是真 Dev、哪些名稱 Dev 但承擔真實資料／用戶 | CYACC main 自動 Deploy 不變 |
 | P3 | BLOCKED on P1/P2 | CYID Dev/Prod 資料與權威差異：Employee、Workspace、Credential 啟用狀態、Application Registry、Role/App Access、Consumer Mapping（只取非敏聚合與可核對 fingerprint） | CYACC/CY Web/CYInvoice 都有正式切換方案及否決/回復條件 | 不直接複製 Dev D1 覆蓋 Production，也不移出密碼 verifier/Session token |
 | P4 | BLOCKED on P1/P2 | 逐 Repo PR 收斂 GitHub Deploy Inputs；正式 Worker 名稱明確化、避免泛名 collision、設定來源唯一化 | PR CI、Config preflight、read-back 與既有 target 100% 一致；CYACC auto push/deploy 保留 | 不先變更 Cloudflare Binding、不添加強制 Reviewer 或遠端測試 Worker |
@@ -122,7 +122,7 @@ Recovery 前置條件或參考（不含 Secret／ID）：
 
 - 使用者已明確授權在需要時透過安全的瀏覽器互動自行登入 Cloudflare 與 GitHub；但**本次沒有進入登入階段**。Browser Use 回報 `insufficient_credits`，要求補充 Browser Use 專案額度，重試無效。**這不是驗證失敗、也不是缺少使用者登入授權。**
 - 上一輪無登入工作階段且瀏覽器導覽回報 `ERR_TUNNEL_CONNECTION_FAILED`。兩輪都**沒有讀到** Cloudflare Dashboard 的 Worker／D1 清單、Service Bindings／Metrics，也沒有讀到三個 Repo GitHub Settings 的 Environment、Secret/Variable 名稱或保護設定。
-- Source-only 的 GitHub workflow/設定引用仍有效，但不能當作目前雲端實體資源數量或 Settings 實際設定的證據。**P1 繼續 PENDING／BLOCKED ON LIVE READ ACCESS；P2～P7 不因此視為通過。**
+- Source-only 的 GitHub workflow/設定引用仍有效，但不能當作目前雲端實體資源數量或 Settings 實際設定的證據。**P1 繼續 BLOCKED ON LIVE READ ACCESS；P2～P7 不因此視為通過。**
 - 可接續路徑：獲得可用的唯讀瀏覽器工作階段、專案瀏覽器額度，或其他**受核准且不輸出 Secret**的唯讀管理 API／清單後，再補實際資源的匿名摘要。不得為查詢方便新建遠端測試 Worker、變更 Cloudflare Token 權限、觸發 Production Deploy，或要求使用者把登入資訊貼在 Chat。
 - 本次僅更新 AITeam 的跨 Repo 工作進度文件；CYACCweb `main` 自動部署與其他正式運作／GitHub Environment 完全未動。
 
@@ -133,3 +133,82 @@ Recovery 前置條件或參考（不含 Secret／ID）：
 - 尚未有 Cloudflare Dashboard 的即時 Worker/D1 全量清冊，且尚未有 GitHub Environment 實際名稱及 Secret/Variable name/scope 的直接 read-back。這部分以 P1 待辦明列，不得假裝完成。
 - 使用者已明確要求：**CYACCweb main 自動部署保持不變**；不再製造任何遠端測試 Worker／probe；目標是單一正式雲端，不做粗暴刪除。
 - 本次 AITeam 文件 PR 僅建立執行主控，不變更 CYID/CYInvoice/CYACC/CY Web runtime、Worker、D1、Service Binding、GitHub Secret／Variable、Deploy Workflow 或 Release。
+
+## 6. Source 核對、整併草案與本地 MCP 交接（2026-10-12）
+
+### 6.1 證據範圍與基準
+
+本節是 **source-only 準備**，不是 Cloudflare／GitHub Settings 的實際清冊。P1 尚未完成，P2 的部署版本對照尚未通過，P3～P7 的 Gate 不變。此輪只更新 AITeam 文件；不修改產品 source、Workflow、Environment、Variables／Secrets 或遠端資源，不觸發 deploy／migration／Release。
+
+| Repo | 此輪核對的 main commit | 使用範圍 |
+| --- | --- | --- |
+| AITeam | `d673a110814e9420522da0708f2e3d2b8589d74a` | 主控文件更新前基準 |
+| CYapps | `c824310e2269777e8d5555d85475e975eed61897` | 四條 Cloudflare deploy Workflow 與相關 resolver／preflight |
+| chihyuan-web | `395be0975f1ea09924ce0e03d30589b5f62a2db6` | development-deploy Workflow 與部署模板 |
+| CYapps_PVT | `8ff622e90dad30143c09414c3b86feed1915902b` | Workflow 路徑清單；不複製 Private 程式內容 |
+
+三個產品 Repo 的共通規則 blob 與 AITeam 已讀母本相同。晚間接手時若 main 已變更，先檢查本次相關檔案差異；本節不代表此後的新 source 已核對。
+
+### 6.2 Workflow 引用與觸發對照
+
+**Environment 欄是 YAML 宣告；Variables／Secrets 欄是引用名稱。它們不證明 Settings 中名稱存在、scope 正確、值正確或已授權。** `permissions: contents: read` 只描述這些 Workflow 的 GITHUB_TOKEN 權限，不能代替 Repository collaborator、GitHub App 或 Cloudflare Token 權限盤點。
+
+| 用例 | Source 觸發條件 | 宣告 Environment | Variables 引用名稱 | Secrets 引用名稱 |
+| --- | --- | --- | --- | --- |
+| CYACCweb | main 相關路徑 push；workflow_dispatch；PR 只驗證 | development | `CF_BACKUP_TOPOLOGY`、`CF_CYACCOUNTINGWEB_CUSTOM_DOMAIN`、`CF_D1_DATABASE_ID`、`CF_D1_DATABASE_NAME`、`CF_R2_BACKUP_BUCKET`、`CF_WORKER_NAME` | `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`CYID_WORKER_NAME` |
+| CYID-D | 指定 deploy 分支 push；dispatch 預設 preflight／可選 upgrade；PR 只驗證 | development | `CYID_D1_DATABASE_ID` | `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`CYID_WORKER_NAME` |
+| CYID-P | workflow_dispatch；PR 只驗證 | development | `CORE_ACCOUNT_APPLICATION_ID`、`CYID_D1_DATABASE_ID`、`CYID_PRODUCTION_CORE_CONSUMER_WORKER_NAME` | `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`CYID_WORKER_NAME` |
+| CYINVOICE-EXISTING | 四條指定分支 push；dispatch 預設 preflight，可選其他三種會修改遠端的模式；PR 只驗證 | development | 無 vars.* 引用 | `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`CYID_WORKER_NAME` |
+| CYWEB-EXISTING | deploy/cyweb-development push 或 workflow_dispatch；PR 只驗證 | development | `CF_BACKUP_ENABLED`、`CF_BACKUP_R2_BUCKET`、`CF_BACKUP_SCHEDULE_ENABLED`、`CF_D1_DATABASE_ID`、`CF_D1_DATABASE_NAME`、`CF_IDENTITY_APPLICATION_ID`、`CF_IDENTITY_SERVICE`、`CF_IDENTITY_WORKSPACE_ID`、`CF_WORKER_NAME`、`GCS_BUCKET` | `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`GCS_SERVICE_ACCOUNT_JSON` |
+| CYapps_PVT | 目前只有 CYWatermark build 與治理／規則同步 Workflow，未見 Cloudflare deploy Workflow | 雲端部署未知 | 雲端部署引用未知 | 雲端部署引用未知 |
+
+Source 證據（以下 Workflow／scripts 均在上述 main 基準核對）：
+
+- CYACCweb：`.github/workflows/cyaccountingweb-deploy.yml`、`apps/CYAccountingWeb/scripts/resolve-cyid-production-runtime.mjs`。
+- CYID：`.github/workflows/cycloudidentity-deploy.yml`、`.github/workflows/cycloudidentity-production-deploy.yml`、`apps/CYCloudIdentity/scripts/render-production-config.mjs`。
+- CYInvoice：`.github/workflows/cyinvoice-cloud-dev-deploy.yml`、`apps/CYInvoice/cloud/scripts/deployment-preflight.mjs`。
+- CY Web：`.github/workflows/development-deploy.yml`、`wrangler.deploy.template.jsonc`。
+- CYapps_PVT：只記錄 Workflow 清單分類，未把 Private source、設定或 Key 轉存 AITeam。
+
+### 6.3 已確認的 Source 行為與整理候選
+
+| 觀察 | 已確認的行為 | 後續草案／前置 Gate |
+| --- | --- | --- |
+| CYACCweb 自動部署 | `main` push 且路徑為 `apps/CYAccountingWeb/**` 或自身 deploy Workflow 時，先 validate 再 deploy；PR 不 deploy。保留本地 D1 migration 驗證、bundle dry-run、正式 secure-login 與前端資產 smoke。 | P4 若整理 Environment 或輸入，保留上述觸發／驗證；不能添加 Required Reviewers，也不能改成僅手動部署。Settings 實際保護規則與最新部署成功狀態仍 UNKNOWN。 |
+| 正式 CYID 名稱來源 | CYID Production 與 CYACC resolver 都由 `CYID_WORKER_NAME` 的 Dev 名稱推導正式目標；CYACC 再檢查 Provider 的 production 宣告與 CYACC scope。 | 實際 Binding 全量核對後，評估明確的正式 Provider 輸入；保留 production read-back gate，不直接把推導改成硬編碼。 |
+| 多 App 同一 Environment | CYapps 的 CYID／CYACC／CYInvoice Workflow 都宣告 `development`；CY Web 也宣告同名環境，但屬另一 Repo，不能當作同一 scope。 | P1 先對照 repo／environment scope 與未引用名稱；不能只憑泛名存在就斷言 collision。P4 才確定是否採 per-App 前綴與正式 Environment。 |
+| CYACC Identity scope owner | `CF_IDENTITY_SERVICE`、`CF_CYID_APPLICATION_ID`、`CF_CYID_WORKSPACE_ID` 由 Provider read-back 在 deployment job 注入，不是本 Workflow 的 GitHub vars 引用。 | 保持 Provider 作為 scope owner；不另複製一組 GitHub scope 真值。實際 ID 不進 Public 文件。 |
+| CYInvoice 雙入口 | Source 定義 `IDENTITY` 與 `IDENTITY_AUTHORITY`，後者 entrypoint 為 `ConsumerAuthoritySync`，兩者應連同一 Provider。 | 晚間查 Active Version 的實際 service target／entrypoint；兩入口不能當成重複 Worker 而刪減。保留原業務 D1 與 Device／Workspace continuity。 |
+| Private Repo 雲端需求 | 未見 Cloudflare deploy Workflow。 | 查實際清冊、手動管理資源及 Repo Settings；無證據前維持 UNKNOWN，不新建空環境。 |
+
+建議執行順序仍是 **P1 實際清冊 → P2 deployed/source/Binding 對照 → P3 authority 差異 → P4 逐 Repo 輸入整理 → P5 個別 Consumer 接續**。Source 準備不授權 P4 修改，更不代替正式切換、Secret 重設或資料遷移的核准。
+
+### 6.4 晚間本地 MCP 唯讀工作單
+
+1. 讀 AITeam 最新 `main:docs/infrastructure/CLOUDFLARE_CONSOLIDATION_PLAN.md`，確認三 Repo main 與相關 source 是否更新。只使用使用者既有授權的本地 MCP；先確認 callable tools 與必要 scope，不新增 Token 權限。若 capability 不足，標 UNKNOWN。
+2. **Cloudflare 清冊**：列出全部相關 Workers／Pages（若有）、active deployments 與 Version；檢查單一或多版本流量配置、Custom Domains／routes、D1 binding、R2、Cron。查 Requests 的時間區間與可用來源，無法查詢或無流量只能記錄事實，不能等同可刪。
+3. **綁定清冊**：逐 Active Version 核對 binding name、type、service target 與 entrypoint；不只查最新上傳但未啟用的 Version。把 CYID-P、CYID-D、CYACC-P、CYWEB-EXISTING、CYINVOICE-EXISTING 與歷史 probe 分開分類；歷史 probe 不建立、不執行、不刪除重試。
+4. **D1 metadata**：核對資料庫／Worker 關係、責任與現有 recovery 能力；P1 不查 Employee、Credential、Session、Workspace／Device 明細或業務資料，不匯出 D1。P3 所需的非敏聚合／fingerprint 另依 Gate 處理。
+5. **三 Repo GitHub Settings**：Environment 名稱；repo／environment 的 Variable／Secret 名稱與 scope；Required Reviewers、wait timer、deployment branch／tag policy、可用 bypass 設定；main branch protection／rulesets；Actions allowed policy 與預設 Workflow permissions。Repository collaborator／App／Cloudflare Token 權限只查可見 metadata，不讀 token／key 值；不能取得則標 UNKNOWN，不因 workflow 的 `contents: read` 推斷管理權限。
+6. **CYACC auto-deploy 專項**：確認 Workflow 啟用、main path trigger、Environment 沒有阻擋自動部署的 approval／branch rule；讀最近一筆相關 main deployment 的 run／job 結果、source SHA 與 active version 對照。只讀既有 run，不 dispatch 或 rerun；缺少證據不宣稱自動部署已通過 live 驗收。
+7. **Settings 名稱比對**：對照 6.2 的引用，分類為「引用且存在／引用但缺失／存在但未被已核對 Workflow 引用／同名跨 scope 待釐清」。未引用只代表本次 source 範圍未引用，不能直接認定可刪；避免要求重建已刪除的 `CYID_WORKER_NAME` Variable。
+8. 使用匿名摘要回寫 AITeam PR，列出 source 與 runtime 不一致、UNKNOWN、每個資源 owner／依賴／保護原因；達到完整清冊與保護風險 Gate 才更新 P1。P2 再對照全部 Consumer 與實際 deployed source，不先修改 Runtime。
+
+MCP／API 回應在送入模型或可公開 log **之前**，就必須限制欄位：Secret 只保留 name／type／scope，不取 Secret 值；不輸出 Token／Cookie／密碼 verifier、Session、個資或業務資料。若 Worker settings API 同時傳回 plain_text 與 sensitive scope，於受保護本地流程裁切，不把原始完整 settings dump 貼進 Chat 或 Git。真實資源名稱／ID 的核對留在受保護本地 mapping；Public AITeam 只用 Alias、存在狀態、數量及不敏感比較結果。Private Repo 若有敏感名稱，公開摘要只保留匿名分類／數量。
+
+公開摘要格式：
+
+| Alias | Owner Repo | Active Version／source 一致性 | D1／R2／Cron | Service Binding 目標 Alias／entrypoint | Requests 區間／摘要 | 回復／保護原因 | UNKNOWN |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| （每個資源一列；不填真實名稱／UUID） | | | | | | | |
+
+GitHub 公開摘要只列可公開的 Environment／Variable／Secret 名稱、scope 與保護狀態；Secret 名稱可見不代表值可讀。管理權限以角色／允許能力描述，不公開個人名單、Private Key、App credential 或內部 ID。
+
+### 6.5 本輪交接
+
+- 日期／時區：2026-10-12，Asia/Taipei；工作階段：P1 前置準備完成，P1 仍 BLOCKED ON LIVE READ ACCESS。
+- AITeam P0 文件已由既有 PR #70／#71 合併 main；本輪追加 source 對照、候選方案與本地 MCP 工作單，不修改永久規則或產品版本。
+- ChatGPT Work 內建 Cloud Browser 已正常開啟 Cloudflare 登入頁；Google OAuth 頁兩次顯示 `502 Bad Gateway / Connection refused`。尚無成功登入或 Cloudflare 清冊證據；本輪不用第三方 Browser Use，也不把其舊額度阻擋當成目前問題。
+- 使用者決定晚間回家改用既有本地 MCP 連 Cloudflare。未讀取登入憑證或 Secret 值，未取得三 Repo Settings 實際名稱／權限清冊。
+- 本輪操作類型：GitHub source 唯讀＋AITeam 文件 PR。CYACC main auto-deploy source 保持原樣；live 設定／最新成功 run 尚未驗證。未建立、上傳或刪除任何遠端 Worker／Version；未改 Identity authority 或 CYInvoice 資料。
+- 下一個 Gate：依 6.4 取得受保護的實際清冊與匿名摘要，再更新 P1；不得把此輪文件準備誤作 P1/P2 完成。
