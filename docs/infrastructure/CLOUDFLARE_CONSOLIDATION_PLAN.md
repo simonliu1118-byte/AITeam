@@ -6,16 +6,18 @@
 >
 > 目標：採**一套正式 Cloudflare 運行環境**＋Local Wrangler/D1 與 GitHub CI 作為主要開發測試方式，避免為每個小程式建立 Dev／Production 成對 Worker/D1。Existing Dev 有實際 Employee／Workspace／Device／業務資料者，在真正完成遷移及驗收前必須保留，不依名稱推斷可刪除。
 
+> **最新基準：2026-10-17（Asia/Taipei），見第 9 節。** CYACC 已依新決定準備合併／發布分離 PR，尚未合併生效；CY Web 與 CYACC 已共用正式 CYID。第 1、6、7、8 節為歷史盤點／方案，舊狀態與執行順序不直接作為目前待辦。本檔仍為唯一主控。
+
 ## 0. 使用者已定案的限制與目的
 
-1. **CYACCweb main 自動部署必須保留。** 這是明確保留的便利性：現階段頻繁修改時，不改為手動批准，也不搬入需要 Required Reviewers 才能部署的 GitHub Environment。等使用者日後確認開發頻率降低，再重新評估。必須保留自動驗證／正式 login 與前端資產 smoke。
+1. **CYACCweb 改採與 CY Web 相同的合併／發布分離。** 使用者 2026-10-16 新決定取代 10/12「保留 main 自動部署」：PR 自動驗證，main 合併不發布；Work 推進受控發布分支或從 main dispatch。CYapps [PR #475](https://github.com/simonliu1118-byte/CYapps/pull/475) 已備妥 workflow、來源檢查與操作文件，仍為未合併 draft；目前 main 的舊自動部署尚未停用。保留正式 login／資產 smoke，不新增人工 Reviewer／wait timer 或測試資源。
 2. **不再建立、上傳、刪除重試遠端測試 Worker／probe Version／清理 handler。** CYInvoice 過去遇到 GET 仍可讀取、DELETE 404／10339，無法安全確認已清理。保留歷史證據、停止遠端測試程式部署、停止額外權限擴張；Local/CI synthetic tests 正常保留。
 3. 目標「單一正式雲端」是**邏輯環境收斂**，不是把所有 App 及 D1 合成一個。CYID 的 Identity D1 與各 App 業務 D1 仍依責任分離；小 App 無雲端資料需求不需 D1。
 4. CYInvoice 的 IDENTITY（Fetcher／Login、Resolve、Logout）和 IDENTITY_AUTHORITY（同 CYID Worker 的 ConsumerAuthoritySync Named RPC，用於離線 Employee 快取失效比對）不是兩個 Worker 或 D1；目前維持兩個入口。
 5. CYInvoice 原 Device、Device Token、Workspace、發票業務、歷史與原 Cloud D1 必須保留；CYID Development／Production 的 Employee、Credential、Role、App Access、Session 也不可直接覆蓋合併。
 6. 文件先進 AITeam PR。各目標 Repo 執行時仍走各自 branch／PR／CI。**本計畫不等於已批准直接做正式身分切換、D1 資料遷移、Worker／D1 刪除、Secret 重設或 Release。** 進到此類操作前必須完成該階段 Gate 並核對可回復證據。
 
-## 1. 唯讀來源盤點（不是 Cloudflare Dashboard 的即時清冊）
+## 1. 初始唯讀來源盤點（2026-10-12 歷史，不是目前即時清冊）
 
 | Repo／系統 | GitHub main 目前可確認事項 | 原則／尚待驗證 |
 | --- | --- | --- |
@@ -46,29 +48,29 @@
 
 ### 非目標
 - 不藉機重構 CYID Session／RBAC／Email 邏輯、CYInvoice Device/Offline 架構或 CYACCweb 記帳業務。
-- 不取消 CYACCweb 自動發布；不把 GitHub Environment Reviewer 強迫套用到 CYACC。
+- 不把 GitHub Environment Reviewer 強迫套用到 CYACC；依使用者新決定採受控分支／main dispatch，操作指令看 CYACC README。
 - 不重啟過去刪不掉的 Worker/Version 清理專案，也不因本輪打開高權限 Cloudflare Token。
 - 不在 Public AITeam Git 中保存真實 Worker Name、D1 UUID、Workspace/Employee ID、Customer/Invoice data 或 Private Repo Key。
 
 ## 3. GitHub Environment／Variables／Secrets 整理方案
 
-**此表保留初始 source 引用與過渡建議；實際 Settings 名稱／scope 已於第 7.4 節核對，最終修改與搬移順序見第 8 節。引用存在不代表值或目標正確。**
+**此表保留初始 source 引用與過渡建議；第 7.4 節僅為 10/12 歷史 UI 證據，目前名稱／scope API 受 403 限制。現行過渡及執行順序見第 9.3／9.4 節，不照第 8 節舊方案搬移。引用存在不代表值或目標正確。**
 
 | Repo／用例 | 原始碼可確認的引用 | 建議 |
 | --- | --- | --- |
 | CYapps／CYID development | secrets.CLOUDFLARE_API_TOKEN、secrets.CLOUDFLARE_ACCOUNT_ID、secrets.CYID_WORKER_NAME、vars.CYID_D1_DATABASE_ID | 此舊來源先保留，直到跨環境權威差異與安全切換完成；Provider 原正式/開發 Binding 必須讀回核對。 |
 | CYapps／CYID Production | 仍使用 environment: development；由既有 CYID_WORKER_NAME 推導 Production，另有 vars.CYID_PRODUCTION_CORE_CONSUMER_WORKER_NAME | 將正式目標改為**明確的來源**，不靠 Dev 字尾推導；以原 Cloudflare 配置 read-back 做嚴格比對，確定無誤才遷移 GitHub Environment。 |
-| CYapps／CYACCweb | vars.CF_WORKER_NAME、CF_D1_DATABASE_NAME/ID、CF_R2_BACKUP_BUCKET、CF_BACKUP_TOPOLOGY、CF_CYACCOUNTINGWEB_CUSTOM_DOMAIN；secrets.CYID_WORKER_NAME 與 Cloudflare credentials | 保留 main 自動部署。搬動 Environment 時新設定不能加 Required Reviewers；先 read-only 綁定核對，確定不存在名稱 collision 才考慮重新命名。 |
+| CYapps／CYACCweb | vars.CF_WORKER_NAME、CF_D1_DATABASE_NAME/ID、CF_R2_BACKUP_BUCKET、CF_BACKUP_TOPOLOGY、CF_CYACCOUNTINGWEB_CUSTOM_DOMAIN；secrets.CYID_WORKER_NAME 與 Cloudflare credentials | #475 準備合併／發布分離；development scope 暫留。先核對名稱、scope 與原目標映射，才搬移；不重建或重設既有 Secret。 |
 | CYapps／CYInvoice | secrets.CYID_WORKER_NAME、Cloudflare credentials；Workspace mapping 與 scope 從 Provider／original business D1 read-back | 不把真實 Employee/Workspace/Device secrets 作第二份 GitHub 真值；保留 CYID_ENABLED 與原有 D1 Device continuity。 |
 | chihyuan-web／CY Web | vars.CF_WORKER_NAME、CF_D1_DATABASE_NAME/ID、CF_IDENTITY_SERVICE、CF_IDENTITY_APPLICATION_ID、CF_IDENTITY_WORKSPACE_ID、CF_BACKUP_*、GCS_BUCKET；相應 Cloudflare/Backup Secrets | 本 Repo GitHub Environment 與 CYapps 獨立；選定最終 CYID 目標後再收斂自身 Deployment Metadata。 |
 | CYapps_PVT | main 無 Cloudflare deploy workflow | 不先建立空的 Cloudflare Variable/Environment，只檢查是否存在實際手動／外部部署。 |
 
 **已完成的歷史工作不是新的 TODO：** 2026-10-12 既有文件記載使用者已刪除 development Environment 與 Secret 同名的 CYID_WORKER_NAME Variable，保留 Secret，並在 CYInvoice read-only preflight 通過。不得又要求新建同名 Variable 或推定它仍待清理。
 
-### Production Environment 與 CYACC 自動發布
+### Production Environment 與受控發布
 
 - 最終建議按 Repo 建立清楚的正式部署環境邊界，但不強迫每 App 有成對的長期 Dev+Prod。
-- **若同一 GitHub Environment 設置 Required Reviewers，CYACCweb 自動部署也會被擋住。** 現階段可採「production Environment 無共通 Reviewer；CYACC main 自動部署；高風險 CYID/CYInvoice Workflow 自己用 workflow_dispatch + 當前 runtime read-back gate」。
+- 本輪保留現有 Environment scope。未來 production scope 必須同時容許 main dispatch 與已核准的受控發布分支；只允許 main 會阻擋分支入口。搬移前核對 metadata 仍指向原 Worker／業務 D1，並保留各 App runtime read-back gate。
 - 之後若特別要為 CYID 設 GitHub Environment 內建人工 Reviewer，再拆出**少量必要**的 CYID 專用 Protected Environment；CYACC 不搬入需要人工核准的環境。
 - CYapps 多 App 共用 Environment 時，CF_WORKER_NAME／CF_D1_DATABASE_ID 等**泛名可能互相覆蓋**。若統一 Environment，需使用 per-App 前綴變數或確定版本的 Runtime Read-back；不應一邊改名字一邊讓 CYACC 自動部署到不明目標。
 - Cloudflare Runtime Secrets 以保留原值、檢查存在與類型為主。GitHub 的 Secret 只有部署必要時才存，不在 Public Repo 或 log 直接回顯；權限縮減／金鑰輪替是後續另外評估項。
@@ -80,10 +82,10 @@
 | ID | 狀態 | 工作 | 驗證 Gate | 安全限制／回復 |
 | --- | --- | --- | --- | --- |
 | P0 | DONE | 在 AITeam 建立這份跨 Repo 主控文件及追蹤入口 | PR 只有 docs 修改，沒有更新產品版本／規則／Workflow／Secrets | 可撤回 PR，不影響現行部署 |
-| P1 | BLOCKED | Cloudflare **唯讀**取得 Worker/Active Version、Custom Domain、D1 Binding、R2、Cron、Service Binding、Requests；GitHub 三 Repo Environment 和 Variable/Secret **名稱**、scope、branch／approval rules | 每個活躍資源有 owner、引用、狀態與回復風險；查不到的標 UNKNOWN | 不顯示 Secret 值；不建立/刪除任何資源 |
-| P2 | BLOCKED on P1 | 對照當前實際 deployed version、三 Repo main workflow、全部 Consumer Binding；修正清冊來源證據 | 清楚哪些是真 Dev、哪些名稱 Dev 但承擔真實資料／用戶 | CYACC main 自動 Deploy 不變 |
-| P3 | BLOCKED on P1/P2 | CYID Dev/Prod 資料與權威差異：Employee、Workspace、Credential 啟用狀態、Application Registry、Role/App Access、Consumer Mapping（只取非敏聚合與可核對 fingerprint） | CYACC/CY Web/CYInvoice 都有正式切換方案及否決/回復條件 | 不直接複製 Dev D1 覆蓋 Production，也不移出密碼 verifier/Session token |
-| P4 | BLOCKED on P1/P2 | 逐 Repo PR 收斂 GitHub Deploy Inputs；正式 Worker 名稱明確化、避免泛名 collision、設定來源唯一化 | PR CI、Config preflight、read-back 與既有 target 100% 一致；CYACC auto push/deploy 保留；同目標 Actions 驗收後可停用重複 Builds 寫入，保留設定與回復記錄 | 不先變更 Cloudflare Binding、不添加強制 Reviewer 或遠端測試 Worker |
+| P1 | IN_PROGRESS | 已回讀 5 Workers／7 D1／2 R2、active bindings 與 Builds；GitHub 名稱 API 403，owner／外部依賴／回復仍有缺口 | 完整 metadata／風險 Gate 未通過；10/12 UI 表不能替代目前 read-back | 不顯示 Secret 值；不建立/刪除資源 |
+| P2 | IN_PROGRESS | CY Web／CYACC 同正式 CYID 已確認；Invoice 仍連舊 CYID；見第 9 節新基準 | 精確 bundle 指紋及所有 Consumer／設定 owner 尚未全部驗收 | 先做不碰資料的 source PR，不據此切換 authority |
+| P3 | BLOCKED | 等 Invoice D1 新 checkpoint，再核權威差異及角色／App Access／Workspace 接續 | CY Web／CYACC 已同 authority，不重做已完成切換；Invoice 另列否決／回復條件 | 不覆蓋 Identity D1，不移出 verifier／Session token |
+| P4 | IN_PROGRESS | CYACC #475 與 CY Web 發布 guard／固定鎖先走 source PR；metadata 搬移受 P1 名稱／scope 缺口阻擋 | PR CI 與同目標 read-back；CYACC 合併／發布分離；首次新模式發布待驗收 | 不先變更 Binding、不加強制 Reviewer 或遠端測試 Worker |
 | P5 | BLOCKED on P3/P4 | 分 App 做 CYID 權威／App Access／Workspace 安全接續；特別保護 CYInvoice Device/Token/Offline/業務歷史 | 真實登入/Session/Role/Access/revoke、Device／Offline/reconnect 和資料連續性驗收；資料備份及回復證據 | 每次只切一個 Consumer，遇歧義停下，不自動重建 Workspace／Employee |
 | P6 | BLOCKED on P5 | 完整退役不再使用的 Dev **部署入口**及多餘 Variables/Secrets／branch triggers（P4 可先停用已驗收的重複寫入） | 連續期間無活躍依賴、來源引用歸零、回復方案仍可執行 | 不在此階段刪實際 Worker/D1，也不重試 10339 |
 | P7 | BLOCKED（另需明確資源清單與核准） | 如確有價值，評估歷史實體 Worker/D1 的個別退場 | 有 owner、可恢復快照、影響/成本證據及實際目標逐一核准 | 未達 Gate 永久保留，不盲刪 |
@@ -92,11 +94,11 @@
 
 | Alias | Owner | 已知保護原因 | 真實 read-back | 處置 |
 | --- | --- | --- | --- | --- |
-| CYID-P | CYapps | CYACC 正式 Identity authority | 未完成 | PROTECT |
-| CYID-D | CYapps | CY Web／CYInvoice 開發線 Identity 依賴 | 未完成 | PROTECT UNTIL MIGRATION |
-| CYACC-P | CYapps | 正式帳務 Worker/D1/Backup 與 auto deploy | 未完成 | PROTECT |
-| CYWEB-EXISTING | chihyuan-web | 現存 Web/業務 D1/入口 | 未完成 | PROTECT |
-| CYINVOICE-EXISTING | CYapps | 原 Workspace／Device／Token Hash／Invoice History | 未完成 | PROTECT |
+| CYID-P | CYapps | CYACC／CY Web 正式 Identity authority | active bindings 已確認；資料接續未全驗收 | PROTECT |
+| CYID-D | CYapps | CYInvoice 仍依賴的 Identity authority | active bindings 已確認 | PROTECT UNTIL MIGRATION |
+| CYACC-P | CYapps | 正式帳務 Worker/D1/Backup 與隔離復原 DB | 部分完成，見第 9 節 | PROTECT |
+| CYWEB-EXISTING | chihyuan-web | 現存 Web/業務 D1/入口 | active bindings 已核；完整 owner／回復未完，見第 9 節 | PROTECT |
+| CYINVOICE-EXISTING | CYapps | 原 Workspace／Device／Token Hash／Invoice History | active bindings 已核；資料連續性待新 checkpoint，見第 9 節 | PROTECT |
 | PVT-CLOUD-UNKNOWN | CYapps_PVT | main 未見 deploy workflow，不等於不存在雲端 | 未完成 | UNKNOWN |
 | HISTORICAL-PROBE | CYapps | 過往刪除失敗版本，禁止 retry | 歷史文檔已留存 | NO DELETE RETRY |
 
@@ -110,7 +112,7 @@ Repository、branch、main SHA、PR：
 Cloudflare 資源（僅用 Alias）：
 實際完成操作（read-only / PR / config / deploy / mutation）：
 CI / runtime read-back／人工驗收：
-CYACCweb main 自動部署是否仍正常：
+CYACCweb 預期發布模式、目前是否生效及成功 deploy 證據：
 是否建立遠端測試 Worker／Version（預期：否）：
 CYID Authority／CYInvoice Workspace/Device/Data Continuity：
 阻擋原因／未驗證事項：
@@ -134,7 +136,9 @@ Recovery 前置條件或參考（不含 Secret／ID）：
 - 使用者已明確要求：**CYACCweb main 自動部署保持不變**；不再製造任何遠端測試 Worker／probe；目標是單一正式雲端，不做粗暴刪除。
 - 本次 AITeam 文件 PR 僅建立執行主控，不變更 CYID/CYInvoice/CYACC/CY Web runtime、Worker、D1、Service Binding、GitHub Secret／Variable、Deploy Workflow 或 Release。
 
-## 6. Source 核對、整併草案與本地 MCP 交接（2026-10-12）
+## 6. Source 核對、整併草案與本地 MCP 交接（2026-10-12 歷史）
+
+本節為歷史紀錄；執行前採第 9 節新基準，不重做已解決項目。
 
 ### 6.1 證據範圍與基準
 
@@ -213,7 +217,9 @@ GitHub 公開摘要只列可公開的 Environment／Variable／Secret 名稱、s
 - 本輪操作類型：GitHub source 唯讀＋AITeam 文件 PR。CYACC main auto-deploy source 保持原樣；live 設定／最新成功 run 尚未驗證。未建立、上傳或刪除任何遠端 Worker／Version；未改 Identity authority 或 CYInvoice 資料。
 - 下一個 Gate：依 6.4 取得受保護的實際清冊與匿名摘要，再更新 P1；不得把此輪文件準備誤作 P1/P2 完成。
 
-## 7. 本地 MCP 實際盤點 2026年10月12日
+## 7. 本地 MCP 實際盤點（2026-10-12 歷史）
+
+Settings UI 名稱／數量與「存取缺口已解除」只適用當時本地登入工作階段。10/17 GitHub 名稱 API 仍為 403；不能推定 production scope 現在仍為空。第 7 個 D1 與 binding 變化見第 9 節。
 
 ### 7.1 P1 狀態與清冊範圍
 
@@ -331,7 +337,9 @@ Recovery 前置條件：各 D1 可讀當前 bookmark；R2 metadata／lifecycle �
 下一個 Gate／工作：補 P1 關鍵缺口，未通過前不推進 P2 至 P7 的變更
 ~~~
 
-## 8. 一次性檢討與修改收斂方案 2026年10月12日
+## 8. 一次性檢討與修改收斂方案（2026-10-12 歷史，已被取代）
+
+**本節修改方向與執行批次已由第 9 節取代，不直接照此執行。**「保留 CYACC main auto」、Invoice enabled 模式待修、CY Web 尚連舊 authority、CYID-P 前置設定缺失等均是當時假設；不可重做或以此阻擋新版方案。當前修改清單、部署入口、Settings 過渡及批次依第 9 節。
 
 本次收斂採一套正式雲端、每個 App 一個正式部署目標與一條部署入口。開發使用 Local Wrangler／D1 與 CI；CYACC main 自動部署保留。以下是修改與驗收方案，尚未執行產品修改、Settings 搬移、身分切換或資源退場；第 4 節 P1～P7 Gate 繼續適用。
 
@@ -428,3 +436,70 @@ Worker 程式回退與 D1／R2 資料回復是兩種操作。Cloudflare 明確�
 本輪完成跨 Repo 問題檢討、目標拓撲、逐檔修改清單、Settings 過渡順序及驗收／回復條件；新增 W04 舊 Builds trigger 與完整 70 筆 build 聚合證據。CYapps source 基準更新為 `daa12582990f729fd8f834826d492e58ed945802`，chihyuan-web 與 CYapps_PVT 維持 6.1 的基準；CYapps 新增差異不涉及本方案所核的部署檔案。
 
 只更新同一 AITeam 文件 PR；Cloudflare、GitHub Settings、產品 source、deploy／migration／Release 均未修改。規劃完成不代表 P1～P7 的執行 gate 已完成，也不把主控文件或附帶 handoff 內容當成新的使用者部署授權。下一個實作入口為 R0／R1，CYACC 相關 PR 的合併必須與 R2 設定預備成為同一個可驗證變更批次。
+
+## 9. 目前執行基準與批次（2026-10-17，Asia/Taipei）
+
+### 9.1 新指示與證據範圍
+
+使用者已要求 CYACC 採 CY Web 的受控發布方式，並將觸發步驟寫入 CYACC 文件；這取代所有歷史段落的「保留 main 自動部署」限制。現階段優先 CYID／CY Web／CYACC 的來源、發布與配置整理；**CYInvoice 與其復原串接等 D1 工作形成新 checkpoint 後再接續**。本輪允許先做不碰資料的 source／文件 PR，不因無關資源用途未明而停止；metadata 搬移、正式發布、authority／資料切換及刪除仍須各自完成目標核對與驗收條件。
+
+本輪 Cloudflare 使用已授權的官方 CLI 唯讀查詢，並非假設 MCP 已可呼叫。5 個 Worker 的 active deployment 回讀前後穩定，均為單一版本 100% 流量；未執行 SQL、讀取私人列資料／備份內容、寄信、部署或更動 Settings。公開文件僅用 Alias；實際資源名稱／ID 的對照留在受保護工作區。
+
+| 項目 | 本輪可核對基準 |
+| --- | --- |
+| AITeam main | `27b1cea4bf1987420a44eb8f9e9fff88c9abfc7d`；沿用並更新本檔的 [PR #73](https://github.com/simonliu1118-byte/AITeam/pull/73)，不另建主控文件 |
+| CYapps main | `65fdee5894ba55041bbef55e55cbc6f0202e7feb`；CYACC 0.25.5；#435 已合併，不再列待發阻點 |
+| CY Web main | `e2d8e194e3921af7896539dd79f15f5fb3a0fed4`；0.8.0；與發布 `ad4b8c549949aee3dbb4c8aa0901866a0d82be3a` tracked tree 相同，main 是該發布 commit 的 ancestor |
+| CYACC 發布模式 PR | [#475](https://github.com/simonliu1118-byte/CYapps/pull/475)，head `9cf5089fbd42949feb9d3d1c8735040acdf59d5b`；draft 未合併，GitHub validate／governance 已通過，deploy 正確 skipped |
+| Invoice 新基準 | #440 head `9c11db1cbf71c41d209b5cb0be1e1bc4c31ca4a2`、CY Web #151 head `a1f09d70239d2e23018ab5c6fec7eb27f916d586`，均 open draft；這些 SHA 只是查詢 checkpoint，不代表 D1 工作完成或已發布 |
+
+### 9.2 目前 active 依賴與保護清冊
+
+全量 metadata 清單為 **5 Workers、7 D1、2 R2**。第 7 個 D1 是 CYACC 的隔離復原資料庫，已被 `RECOVERY_DB` 引用；不是新增一套一般 Dev 環境。
+
+| Alias | Active version number／產品宣告 | 儲存與私有服務依賴 | 處置 |
+| --- | --- | --- | --- |
+| CYWEB-EXISTING | 65／SOURCE_VERSION=0.8.0 | 原業務 D1；`IDENTITY` → CYID-P；無 active 備份 R2／GCS 配置 | PROTECT；來源版本已前進，不能回套 10/15 的 0.7.24 或 10/16 的 0.7.37 |
+| CYACC-P | 240；main／既有部署證據產品為 0.25.5，未比對 bundle 逐位元指紋 | 原業務 D1、R2-01、隔離復原 D1；`IDENTITY` → CYID-P，`BACKUP_NOTIFICATIONS` → 同 Provider 的 `ConsumerNotifications` | PROTECT；不重做既有備份配置，不因有 binding 宣稱完整 DR 驗收 |
+| CYID-P | 9；10/16 health 0.3.10 | 正式 Identity D1；APP_ENV=production | PROTECT；CY Web／CYACC 已共用此 authority；不重做 core portal 切換 |
+| CYINVOICE-EXISTING | 95；CYID_ENABLED=true | 原業務 D1；`IDENTITY` 及 `IDENTITY_AUTHORITY` 都 → CYID-D，後者 `ConsumerAuthoritySync` | PROTECT；雙入口不是兩個 Worker，不先切換／停用 Provider |
+| CYID-D | 122；10/16 health 0.3.7 | 舊 Identity D1；APP_ENV=development | PROTECT；Invoice 仍有依賴，不能先退場 |
+| DB02 | 本次 5 個 active versions 未引用 | owner／外部與手動用途 UNKNOWN | PROTECT；未引用不是可刪證據 |
+| R2-02 | 本次 active versions 未引用 | 備份候選 owner／用途與內容待核；本輪未重查 object metadata | PROTECT；不以 10/12 空 bucket 判定現在可刪 |
+
+兩套 CYID active metadata 均為 `EMAIL_PROVIDER=brevo`，並有 `BREVO_API_KEY` Secret binding；僅核對名稱／型別，不讀 key、不重設憑證、不發測試信。CY Web 與 CYACC 的首次登入 authority 阻點已解除，不代表所有真實登入／災復案例完成驗收。
+
+CY Web 原發布分支含歷史 merge，因此 SHA 與 main 不同不等於 source 漂移。新 guard 要求事件 SHA=checkout SHA、當前 main 為 ancestor，且 tracked tree 完全相同；main dispatch 另要求 SHA 完全相同。CYACC 新發布分支則直接指向當前 main 完整 SHA，兩者均不靠 force-push 重寫來源。
+
+### 9.3 當前發布入口與配置缺口
+
+| 系統 | 目前 main／live 行為 | 本輪 source 整理／後續 Gate |
+| --- | --- | --- |
+| CYACC | main 相關路徑 push 仍會部署，另有 dispatch；Environment 仍為 development | #475 合併後改 `deploy/cyaccountingweb-production` push 或 main dispatch；固定同目標 deploy 鎖、cancel=false、migration／資源準備前 exact main SHA guard；README 已有 Work 指令與成功判定。未合併前不宣稱已切換 |
+| CY Web | `deploy/cyweb-development` push 或 dispatch，另有唯讀 audit；Environment 仍為 development | [CY Web #178](https://github.com/simonliu1118-byte/chihyuan-web/pull/178) source PR 固定 deploy 鎖、cancel=false、dispatch main-only、current-main ancestry／tree guard；validate／audit 分鎖。保留原 Worker／D1／域名／Identity 與既有 health／schedule／Session／portal gates，首次新模式發布待驗收 |
+| CYID-P | 固定部署鎖與 cancel=false 已存在；成功部署證據已有 | 不重做部署鎖或假設舊 prerequisite 仍缺。正式 Worker 仍由 Dev 名稱推導，明確 Provider 輸入／Environment scope 另批處理 |
+| CYInvoice | Actions 與 1 條 Workers Builds trigger 仍並存；其他 4 Worker 本輪均無 Builds trigger | 保留 enabled=true 的普通更新已修正，不重做此修正。等 D1 新基準後先驗收 Actions，再停用舊 Builds；目前不改 trigger 或舊分支 |
+
+GitHub Environment 詳情可讀：已核對的 development scope `protection_rules=[]`、`deployment_branch_policy=null`。但 CYapps／CY Web repo 與 environment 的 Secret／Variable **名稱／scope 清單仍受 integration HTTP 403 限制**；10/12 UI 清單是歷史證據，不能當成目前名稱、值或 production scope 為空的證明。403 也不等於設定不存在，不要求重建同名 Variable／Secret。
+
+後續 metadata 過渡順序：取得當前名稱／scope 與非敏目標映射 → 明確逐 App input owner → 新輸入仍指原 Worker／業務 D1／域名的 preflight → PR／CI → 已授權的同目標發布及 active read-back → 確認無引用／無回復需要後退出舊 metadata。Provider 繼續擁有 App／Workspace scope，不在 GitHub 複製第二份真值；無需為命名而重設 runtime Secret。Environment 搬移時須同時容許兩種核准入口，不增加阻擋 Work 的共通 Reviewer。
+
+### 9.4 目前執行批次與完成判定
+
+| 順位 | 狀態 | 工作／完成判定 |
+| --- | --- | --- |
+| A：主控對齊 | IN_PROGRESS | 更新既有 #73，標明已解決項目、當前來源與 API 界線；歷史 §6～8 不再作執行清單。文件 review／Governance Check 通過後待合併 |
+| B：同目標發布 | IN_PROGRESS | CYACC #475 已通過 PR CI，CY Web #178 已建立未合併 draft；保留自動 PR 驗證與所有原有發布 gates。各自合併後，下一次已授權發布回讀實際 source guard／deploy 成功；PR 綠燈或 skipped 不等於上線 |
+| C：metadata／Environment | BLOCKED | 先補當前名稱／scope read-back；在原目標映射證明前不搬移設定。已準備 source PR 不因此停工 |
+| D：CY Web 備份 | PENDING | 確認既有 bucket owner、資料範圍／GCS 配置及恢復方法，才受控配置、建立備份、隔離還原，最後啟用排程；本輪不啟用 |
+| E：Invoice 接續 | BLOCKED | owner 固定 D1 新 checkpoint：main／draft、active version、schema／profile、Device／Workspace／Audit、待發 migration、備份與相容回復；再做唯一入口、authority 接續與 #440／#151 聯測，不覆寫新工作 |
+| F：舊設定／可選實體退場 | BLOCKED | 證明 owner、依賴為零及回復能力；設定退出與實體刪除分開。舊 CYID、DB02、R2-02 目前都不是可刪清單 |
+
+本輪不全量重查流量、所有域名／routes、Cron 或備份內容，也不把 10/12 的數量／request 聚合／lifecycle 當新證據。CYACC 既有本地／正式復原驗收應由 owner 最新交接引用，本輪未重做，不宣稱失效或已重驗。範圍足以準備本批 source PR，尚不足以宣稱 P1～P7 全部完成、正式權威整併或實體資源可退休。
+
+### 9.5 本批 source／文件驗證
+
+- CYACC #475：GitHub [validate](https://github.com/simonliu1118-byte/CYapps/actions/runs/38945121671) 與 [Governance](https://github.com/simonliu1118-byte/CYapps/actions/runs/38945121639) 成功；PR deploy skipped，網站未因此發布。
+- CY Web #178：本機完整 Node suite 97／97；部署合約／canonical CYID 合成稽核、exact-sync／support window、rendered CI D1 migrations、Vite build、核對正確 CI bundle 後 dry-run、actionlint 及 Governance Check 通過。真實 Git history 測試涵蓋發布 merge、變更 tree 及過期 main 拒絕。遠端 CI／run 結果以 PR checks 為準，PR 不部署。
+- 本檔與 CY Web source 已完成獨立唯讀工程審查；公開 Alias／資源識別字檢查與 diff whitespace 檢查通過。只更新既有 #73 主控文件，不變更 AITeam 產品、共通規則或版本。
+- 已重查兩個 repo 的 development Environment：無 reviewer／branch 限制；repo 及 environment 的 Secret／Variable 名稱 API 仍 403。未搬移 metadata、重設 Secret、啟用備份、觸發部署／migration、切換 authority 或刪除資源。
