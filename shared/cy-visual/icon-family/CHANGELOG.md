@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `AutoQ` for CYERPAutoQuery (user-approved 2026-10-16): CYERPAutoInput's `Auto` lettering, frame and `#FE6A02` accent with a large `Q` as the lower motif. Exported with the existing `tools/export_icons.py`; every existing app's PNG/ICO bytes were reproduced unchanged.
 - Consolidated family documentation into `README.md`, `ICON_FAMILY.md`, and `CHANGELOG.md`.
 - Removed the standalone creation brief and standalone version file.
 - Clarified that AITeam is the single family-level canonical source; downstream app repositories should receive only their approved production assets.

@@ -6,7 +6,7 @@ This package is design/reference material, not a fourth governance layer.
 
 ## Current status
 
-The approved family has a normalized vector master, seven per-app SVG sources, and verified derived Windows icon assets.
+The approved family has a normalized vector master, eight per-app SVG sources, and verified derived Windows icon assets.
 
 Approved visual direction:
 
@@ -14,7 +14,7 @@ Approved visual direction:
 - white interior;
 - large identifier above one simple app-specific motif;
 - one accent family per app;
-- current identifiers: `INV / ACC / ENV / Auto / WM / CVT / CAL`.
+- current identifiers: `INV / ACC / ENV / Auto / AutoQ / WM / CVT / CAL`.
 
 `WTM` was replaced by `WM` for CYWatermark by user decision.
 
@@ -51,6 +51,7 @@ icon-family/
 │  ├─ accounting/...
 │  ├─ envelope/...
 │  ├─ erp-autoinput/...
+│  ├─ erp-autoquery/...
 │  ├─ watermark/...
 │  ├─ converter/...
 │  └─ tri-invoice-calc/...
