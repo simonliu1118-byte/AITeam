@@ -56,6 +56,7 @@ The current app SVGs preserve the silhouettes from the user-approved visual sour
 | CYAccounting | CYAccounting | `ACC` | `#03A844` | accounting bars + money |
 | CYEnvelope | CYEnvelope | `ENV` | `#761EE1` | envelope |
 | CYERPAutoInput | CYERPAutoInput | `Auto` | `#FE6A02` | document/input + direction |
+| CYERPAutoQuery | CYERPAutoQuery | `Auto` + large `Q` | `#FE6A02` | large Q (query) |
 | CYWatermark | CYWatermark | `WM` | `#019EB9` | marked document / water drop |
 | SMARTCOPIConverter | CYConverter | `CVT` | `#F09D03` | document conversion |
 | TriINVCalc | CYTriplicateCalculator | `CAL` | `#FD4944` | calculator |
@@ -63,6 +64,8 @@ The current app SVGs preserve the silhouettes from the user-approved visual sour
 `WM` supersedes the earlier `WTM` identifier by explicit user decision.
 
 `Auto` remains the approved readability exception to the short-uppercase default.
+
+`AutoQ` (CYERPAutoQuery, user-approved 2026-10-16) reuses the `Auto` lettering, frame and accent of CYERPAutoInput and replaces the lower motif with a large `Q`, so the two ERP automation tools read as one pair; they are planned to merge into one program later.
 
 The two horizontal lines are an INV-specific motif, not a universal family mark.
 
@@ -74,6 +77,7 @@ Canonical per-app vector sources:
 - `apps/accounting/ACC.svg`
 - `apps/envelope/ENV.svg`
 - `apps/erp-autoinput/Auto.svg`
+- `apps/erp-autoquery/AutoQ.svg`
 - `apps/watermark/WM.svg`
 - `apps/converter/CVT.svg`
 - `apps/tri-invoice-calc/CAL.svg`
@@ -143,6 +147,7 @@ Included:
 - CYAccounting
 - CYEnvelope
 - CYERPAutoInput
+- CYERPAutoQuery
 - SMARTCOPIConverter
 - TriINVCalc
 

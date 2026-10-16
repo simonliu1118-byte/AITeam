@@ -15,6 +15,7 @@ SOURCES = {
     "ACC": ("CYAccounting", "accounting", "#03A844"),
     "ENV": ("CYEnvelope", "envelope", "#761EE1"),
     "Auto": ("CYERPAutoInput", "erp-autoinput", "#FE6A02"),
+    "AutoQ": ("CYERPAutoQuery", "erp-autoquery", "#FE6A02"),
     "WM": ("CYWatermark", "watermark", "#019EB9"),
     "CVT": ("CYConverter", "converter", "#F09D03"),
     "CAL": ("CYTriplicateCalculator", "tri-invoice-calc", "#FD4944"),

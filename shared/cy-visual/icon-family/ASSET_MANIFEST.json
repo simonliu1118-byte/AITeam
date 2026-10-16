@@ -483,6 +483,123 @@
         ]
       }
     },
+    "AutoQ": {
+      "app": "CYERPAutoQuery",
+      "folder": "erp-autoquery",
+      "accent": "#FE6A02",
+      "svg": {
+        "bytes": 2709,
+        "sha256": "389db089467326501b08e5374cbadd43e30cfddef30bb8f0117ef842ef1052fc",
+        "git_blob_sha1": "22affba0e93e9c338d1bd7e17391e613d65d3148"
+      },
+      "png": {
+        "16": {
+          "bytes": 562,
+          "sha256": "9f393a8999f962fc25abdd99fed8c7d3ad9095cbcba961b0889a435374eedb81",
+          "git_blob_sha1": "24b674be86b4d406757216b28b8fa94cb15c86ea",
+          "dimensions": [
+            16,
+            16
+          ],
+          "mode": "RGBA"
+        },
+        "24": {
+          "bytes": 944,
+          "sha256": "19080995bd88bb827ecdb0b5021053a1515d7e84c574fd38b6b2d26a3bbe9fd1",
+          "git_blob_sha1": "5defdcc2fac89cea079074b098ef482f50d708c9",
+          "dimensions": [
+            24,
+            24
+          ],
+          "mode": "RGBA"
+        },
+        "32": {
+          "bytes": 1313,
+          "sha256": "930d6b78cb31de88d8118557a14ec19b3a006d55876c19c49b9aa7535db14416",
+          "git_blob_sha1": "574e8ea0a785f7f1bbb7d695da9f95a48fd18178",
+          "dimensions": [
+            32,
+            32
+          ],
+          "mode": "RGBA"
+        },
+        "48": {
+          "bytes": 2057,
+          "sha256": "93d0c388fb6bdf6212b78076284d54a7d29abcede2760e1d9b720b0551d04222",
+          "git_blob_sha1": "115e7c60a35ae0072a993eb9de0741927e0bd701",
+          "dimensions": [
+            48,
+            48
+          ],
+          "mode": "RGBA"
+        },
+        "64": {
+          "bytes": 2853,
+          "sha256": "e8a2d0e0624e91cc7e2705b8ad1357ba58891109548ec19c89ce8a204258f757",
+          "git_blob_sha1": "d945dbe3ac062a6ee942592f9495e5200983ea89",
+          "dimensions": [
+            64,
+            64
+          ],
+          "mode": "RGBA"
+        },
+        "128": {
+          "bytes": 5683,
+          "sha256": "b900630f93b7490469d052ed51a8f4340fae36fb504a7e626dfe30132dc803f2",
+          "git_blob_sha1": "969352f14c79ddefc86b4d12ec41ef550bfa589c",
+          "dimensions": [
+            128,
+            128
+          ],
+          "mode": "RGBA"
+        },
+        "256": {
+          "bytes": 11898,
+          "sha256": "d866ae703dd600385252a15dc5f55bd1a79fcbe7ec52a7a19d8759898097087a",
+          "git_blob_sha1": "166edb77ceeb7344bba2b4c7819664ceadd1f272",
+          "dimensions": [
+            256,
+            256
+          ],
+          "mode": "RGBA"
+        }
+      },
+      "ico": {
+        "bytes": 25428,
+        "sha256": "0ce949fc99732895de53ea87d798fbf1d9f7dcfbd52674d0af45da7f402bb999",
+        "git_blob_sha1": "67cc9b3e26cd4a48d7e531095dda5535e5a16a24",
+        "entries": [
+          [
+            16,
+            16
+          ],
+          [
+            24,
+            24
+          ],
+          [
+            32,
+            32
+          ],
+          [
+            48,
+            48
+          ],
+          [
+            64,
+            64
+          ],
+          [
+            128,
+            128
+          ],
+          [
+            256,
+            256
+          ]
+        ]
+      }
+    },
     "WM": {
       "app": "CYWatermark",
       "folder": "watermark",

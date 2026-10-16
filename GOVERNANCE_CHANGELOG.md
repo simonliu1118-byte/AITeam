@@ -1,5 +1,16 @@
 # AITeam Governance Changelog
 
+## 2.7.5 — 2026/10/16
+
+- 新增 `.github/workflows/cleanup-merged-branches.yml`（比照 CYapps）：PR 合併後由 Actions 刪除該 PR 的短期分支，落實共通規則「已完成的短期 branch 合併後應刪除」；AI 工作環境無法直接刪除遠端分支。
+- 本 workflow 首次推上 main 時一次性刪除已合併的 `governance/icon-erp-autoquery`（AITeam#74）。
+- 不修改共通規則或其他 workflow。
+
+## 2.7.4 — 2026/10/16
+
+- CY Icon Family（`shared/cy-visual/icon-family/`）新增 CYERPAutoQuery 圖示 `AutoQ`：沿用 CYERPAutoInput 的 `Auto` 字樣、外框與 `#FE6A02` 色系，下方圖示改為大 `Q`；使用者 2026-10-16 確認。以既有 `tools/export_icons.py` 匯出 16～256 px PNG 與 ICO，並更新 `ASSET_MANIFEST.json`；其餘七個 App 的衍生檔逐位元組不變。
+- Icon Family 適用範圍加入 CYERPAutoQuery（CYapps）。本次不修改共通規則、Desktop Visual Guide 或其他 App 圖示。
+
 ## 2.7.3 — 2026/10/04
 
 - Common Rules 升級至 2.8.0，將 2.7.0 的禁止版本殼原則補強為可執行的 Canonical Owner／Replacement／Architecture Exception 治理。
