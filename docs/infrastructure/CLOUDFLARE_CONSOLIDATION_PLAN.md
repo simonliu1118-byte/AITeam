@@ -6,7 +6,7 @@
 >
 > 目標：採**一套正式 Cloudflare 運行環境**＋Local Wrangler/D1 與 GitHub CI 作為主要開發測試方式，避免為每個小程式建立 Dev／Production 成對 Worker/D1。Existing Dev 有實際 Employee／Workspace／Device／業務資料者，在真正完成遷移及驗收前必須保留，不依名稱推斷可刪除。
 
-> **最新基準：2026-10-17（Asia/Taipei），見第 9／10 節。** CYACC #475 已合併，合併／發布分離已生效，首次新模式發布仍待驗收；CY Web 與 CYACC 已共用正式 CYID。第 1、6、7、8 節為歷史盤點／方案，舊狀態與執行順序不直接作為目前待辦。本檔仍為唯一主控。
+> **最新基準：2026-10-17（Asia/Taipei），見第 9／10 節。** CYACC #475 已合併，合併／發布分離已生效，首次新模式發布仍待驗收；CY Web 與 CYACC 已共用正式 CYID。CY Web HTTPS 修正已建立 [PR #180](https://github.com/simonliu1118-byte/chihyuan-web/pull/180)，來源 0.8.2／Build 0，正式環境最近一次確認仍為 0.8.1，詳 §10.6。第 1、6、7、8 節為歷史盤點／方案，舊狀態與執行順序不直接作為目前待辦。本檔仍為唯一主控。
 
 ## 0. 使用者已定案的限制與目的
 
@@ -549,10 +549,22 @@ R2-02 雖名稱／歷史規劃提示 CY Web 候選，但 active 無 binding、�
 
 ### 10.5 Source／本機隔離驗證與可執行下一批
 
-CY Web 0.8.1 main 的既有備份程式只有全部必要 inputs 就緒才建立服務，排程還須另行 opt-in；R2 30 天、GCS 182 天，GCS 排程日為台灣週三／週日，手動及 pre-restore 同時要求兩個 provider。還原要求 SUPER_ADMIN、雙確認、相同 Workspace／schema，以及隔離空 D1，未替既有資料庫提供任意覆寫入口。
+CY Web 0.8.1 main 的既有備份程式只有全部必要 inputs 就緒才建立服務，排程還須另行 opt-in；R2 30 天、GCS 182 天，GCS 排程日為台灣週三／週日，手動及 pre-restore 同時要求兩個 provider。內部 isolatedRecovery service／本機驗收要求 SUPER_ADMIN、雙確認、相同 Workspace／schema，以及隔離空 D1。目前公開備份 API 僅接 list／create／retry，尚無 production 隔離還原操作入口；這些內部限制不等於正式操作入口已完成，不能直接用來宣稱可執行正式 DR。
 
 - 本機在上述 main SHA 執行 **7／7** backup provider／schedule tests 通過，GCS 為合成 transport，未使用正式 credential。
 - 原有 Wrangler isolated Worker＋D1 runner 套用 **13 個 migrations**，**17 個 acceptance checks 全通過**，包含 `portableBackupRecovery`、`tieredBackup`、`isolatedRecovery`。只在臨時本機 D1 寫入合成資料，不是正式備份內容驗證或 production restore。
 - 下一批先處理 CY Web HTTPS 入口的 source／設定方案；其後確認 R2-02 owner、核准 GCS 目標／最小權限及原 D1 的備份範圍，以原程式完成一次受控備份與隔離還原，再開例行備份排程。
 - GitHub 設定權限缺口仍獨立存在：新增只讀網路 Secret 已保存並出現在 runtime，但同一路徑仍回 integration 403，未能確認新 token 真正生效。不要求重建或擴權，也不把此阻點擴大成 Cloudflare metadata 不能查。
 - 本批回寫仍只有本份主控文件；不修改 DNS、TLS、Worker、D1、R2 policy、GitHub Settings 或產品 source，不部署、寄信、SQL 查正式資料或刪除任何資源。下一批部署與備份啟用仍依各自的目標核對與當次指示執行。
+
+### 10.6 HTTPS 修正與備份配置準備（同日續作）
+
+使用者已指示開始修正。本批產品 source 沿用各 Repo 的 branch／PR；主控仍只更新本檔，不另建協調真值。
+
+- **HTTPS source：** [CY Web #180](https://github.com/simonliu1118-byte/chihyuan-web/pull/180)，head `a5d44af6c428cce7fc1d94caf31ad8ddf9657ef4`，來源版本 **0.8.2／Build 0**。所有請求先經同一 Worker transport 邊界，公開 HTTP 在讀取 body／binding 前 308 至同 host／path／query 的 HTTPS；公開 HTTPS 加一年、僅限目前 host 的 HSTS。API 保留原路由與 JSON fallback，非 API 才交 ASSETS 提供原 SPA／靜態檔；loopback 開發保留 HTTP。
+- **發布驗收：** workflow 新增正式網域與 workers.dev 的 HTTP→HTTPS、HSTS、首頁 HTML 與 built JS 檔案類型檢查，避免 SPA fallback 的 HTML 200 被誤認為 JS 成功；保留原 source／consumer／D1／Session／schedule gates。與發布流程 [#178](https://github.com/simonliu1118-byte/chihyuan-web/pull/178) 分開，#180 不代替固定鎖／main ancestry／tree guard 的審查。
+- **取捨：** 首頁及靜態檔必須先 invoke Worker，會增加相應 Worker request 用量；ASSETS 保留原回應及 cache headers。不修改共用 Zone、DNS 或其他 host。
+- **本機證據：** 最終 head 完整 Node **106／106**，含新增 **10** 項 transport／deployed-smoke 檢查及實際 Miniflare asset router。Browser／Worker TypeScript、source contracts、13 migrations／17 isolated Worker＋D1 acceptance checks、Vite build、rendered CI bundle dry-run、actionlint 及本機 Governance Check 通過；localhost 實際首頁／API／模組均 200，沒有 HSTS 或轉址。MIME 審查修正後重跑完整 Node suite；未重新執行正式登入或寄信。
+- **備份準備：** CY Web 部署文件已列出受保護的 R2／GCS inputs、bucket 級最小權限與先手動雙副本／隔離還原再開排程的步驟。R2-02 owner、核准 GCS bucket／credential 位置仍待確認；不讀取或沿用其他 App 的 Secret。另須完成 production 隔離還原操作入口，並以獨立空 D1 驗收，不能部署 acceptance Worker 代替。備份啟用與例行排程仍未完成。
+- **遠端 CI：** #180 head `a5d44af6c428cce7fc1d94caf31ad8ddf9657ef4` 的 [Runtime Check 38955619793](https://github.com/simonliu1118-byte/chihyuan-web/actions/runs/38955619793)、[部署合約 38955619833](https://github.com/simonliu1118-byte/chihyuan-web/actions/runs/38955619833)、[Governance 38955620189](https://github.com/simonliu1118-byte/chihyuan-web/actions/runs/38955620189) 均 success。PR 的 deploy／audit jobs 按設計 skipped，並未發布。已完成獨立 source／交接文件審查。
+- **上線界線：** #180 為 draft；本批未合併、發布或更動 runtime bindings。正式環境仍以 §10.1 最近回讀的 0.8.1／active 66 為基準，不能把 source 0.8.2 當成已上線。下一步完成 source CI／審查，再按核准的同目標發布入口驗收；備份另待上述配置與操作 Gate。
