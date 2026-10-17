@@ -30,3 +30,7 @@ Runtime data, credentials, provider states, and managed repositories are not com
 ## Portable Windows EXE development
 
 The portable EXE rewrite started at `v0.2.0-alpha.1` and has, as of `v0.5.0`, absorbed the full guarded change-task pipeline (Scout → Plan Gate → Implement → Verify → Challenge → Final Review → Repair → version/commit/tag/push). See `docs/EXE_MIGRATION_PLAN.md` for the phased history and `docs/V0.4.0.md` / `docs/V0.5.0.md` for what shipped in each release.
+
+## Shared engineering references
+
+- `docs/DESKTOP_IDENTITY_PROVIDER_GUIDE.md` — provider-neutral desktop authentication / authorization architecture reference. Use it when a desktop project introduces accounts, permissions, Cloud identity or offline credential handling; target repository rules still take precedence.
