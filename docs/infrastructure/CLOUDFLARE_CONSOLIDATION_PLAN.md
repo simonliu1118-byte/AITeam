@@ -6,7 +6,7 @@
 >
 > 目標：採**一套正式 Cloudflare 運行環境**＋Local Wrangler/D1 與 GitHub CI 作為主要開發測試方式，避免為每個小程式建立 Dev／Production 成對 Worker/D1。Existing Dev 有實際 Employee／Workspace／Device／業務資料者，在真正完成遷移及驗收前必須保留，不依名稱推斷可刪除。
 
-> **最新基準：2026-10-17（Asia/Taipei），見第 9／10 節。** CYACC #475 已合併，合併／發布分離已生效，首次新模式發布仍待驗收；CY Web 與 CYACC 已共用正式 CYID。CY Web [HTTPS #180](https://github.com/simonliu1118-byte/chihyuan-web/pull/180) 與 [發布護欄 #178](https://github.com/simonliu1118-byte/chihyuan-web/pull/178) 已合併，**0.8.2／Build 0 已部署並驗收**，詳 §10.7。第 1、6、7、8 節為歷史盤點／方案，舊狀態與執行順序不直接作為目前待辦。本檔仍為唯一主控。
+> **最新基準：2026-10-17（Asia/Taipei），見第 9／10 節；備份參考續作見 §10.8。** CYACC #475 已合併，合併／發布分離已生效，首次新模式發布仍待驗收；CY Web 與 CYACC 已共用正式 CYID。CY Web [HTTPS #180](https://github.com/simonliu1118-byte/chihyuan-web/pull/180) 與 [發布護欄 #178](https://github.com/simonliu1118-byte/chihyuan-web/pull/178) 已合併，**0.8.2／Build 0 已部署並驗收**，詳 §10.7。第 1、6、7、8 節為歷史盤點／方案，舊狀態與執行順序不直接作為目前待辦。本檔仍為唯一主控。
 
 ## 0. 使用者已定案的限制與目的
 
@@ -578,3 +578,13 @@ CY Web 0.8.1 main 的既有備份程式只有全部必要 inputs 就緒才建立
 - **Cloudflare 回讀：** 原 Worker active version **67**、單一版本 **100%** 流量。相對發布前 version 66，原業務 D1、Identity／其他 service、Secret binding 名稱及備份 opt-in contract 相同；備份仍未啟用。不是建立第二套 Worker／D1，亦未修改共用 Zone、DNS、R2 policy 或 Brevo。
 - **獨立線上回讀：** 正式網域與 workers.dev 的 health 均為 **0.8.2／consumer1.0.5／f70cc56…／D1 ok**；HTTPS 首頁／登入頁／實際 JS 與 API 均有一年 HSTS，未知 API 保持 JSON404；隨機無效 Session 仍401並清 cookie。此雲端代理對 plain HTTP 關閉 socket，因此本機包含 HTTP 的額外 smoke 未通過；HTTP exact redirect 的證據使用本次 GitHub runner 已成功的正式部署 step，HTTPS 的獨立檢查則全通過，未略過或修改 repository 驗證。
 - **後續：** CY Web HTTPS 與首次新模式發布已完成。備份的 R2 owner／核准 GCS 目標及 credential 位置、正式隔離還原操作入口與實際雙 provider 演練仍待完成；本輪不代表備份／災復已就緒。沒有建立 tag／Release、執行正式 restore、寄信、切換 Invoice authority 或刪除資源；亦未部署 CYACC，該 App 首次新模式發布仍待其自身驗收。
+
+### 10.8 CYACC Phase D 參考與 CY Web 啟用前修正（2026-10-17）
+
+使用者確認 CYACC Phase D 已運行，要求 CY Web 在檢查通過後沿用同模式，並提供專用 Web GCS bucket 非公開／目前無可見物件的畫面。實際資源真名僅保留於受保護工作區，不重建 bucket，也不沿用另一 App 的廣權限 key。
+
+- **參考已成立：** CYACC active version 240，本輪重查具有 R2／GCS／RECOVERY_DB／通知 bindings。其 Phase D 由 append-only policy event 啟用：台灣每日03:30，R2每日30天、GCS週三／週日182天，manual／pre-restore雙副本；14次Phase C、真實雙provider隔離驗證與GCS→獨立D1還原證據沿用原 owner `BACKUP_ARCHITECTURE_HANDOFF.md`／`WORK_HANDOFF.md`，不重跑已完成演練或改動 CYACC。新政策 GCS 的實際週期排程觀察仍依該 App 自己的最新證據，不由本輪 binding metadata 代替。
+- **Web 的實際差異：** 原排程與 retention 已相同，但 R2 寫入失敗便 return，會抑制當次應執行的 GCS。已建立 [CY Web #182](https://github.com/simonliu1118-byte/chihyuan-web/pull/182)，head `ab58fb5f5b15429310b653c5744c4dee07cbe722`，source **0.8.3／Build 0**，讓同一份單次 export 的兩 provider 各自嘗試、驗證、稽核，UI 正確提示 GCS-only 成功。普通 R2-only 日不多建 GCS；retention 仍要求同provider的新副本 verified，pre-restore 仍要求安全副本雙端 verified。
+- **驗證：** 新增 actual Worker＋D1 故障回歸先在舊 source 重現 `ACCEPT_BACKUP_R2_OUTAGE_BLOCKED_GCS`；修後13 migrations／17 acceptance checks通過，涵蓋manual／pre_restore／週三R2故障、未排定GCS日、雙失敗及GCS-only安全副本不得寫入隔離目標。Node110／110、Browser／Worker typecheck、source contracts、Vite build、提交後Governance及獨立工程審查通過；head `ab58fb5` 的遠端 [Runtime 39008922077](https://github.com/simonliu1118-byte/chihyuan-web/actions/runs/39008922077)、[部署合約 39008922115](https://github.com/simonliu1118-byte/chihyuan-web/actions/runs/39008922115)、[Governance 39008922088](https://github.com/simonliu1118-byte/chihyuan-web/actions/runs/39008922088) 均 success；PR deploy skipped。
+- **配置界線：** Web GCS bucket 由使用者畫面確認；後續 GitHub `development` Environment 畫面也確認該 scope 沒有 `GCS_SERVICE_ACCOUNT_JSON` 或備份 variables，需透過 GitHub 受保護設定補齊；IAM／lifecycle仍待確認。這不等於其他scope均不存在。13:59那一次Web deployment runner 的 `GCS_SERVICE_ACCOUNT_JSON` 注入值為空，只核對存在狀態、不讀值；這不證明現在所有scope都沒有Secret。GitHub名稱API仍403，不要求重建token或讀另一App的key。
+- **容量與啟用：** 對原業務D1僅做aggregate SELECT，確認目前未超過exporter的500總筆數，0列寫入、不讀取業務內容；5MiB限制仍由實際export驗證。paired copy、正式隔離還原操作入口及實際驗收就緒後才開排程。Web正式環境仍為§10.7的**0.8.2／active67**；#182尚未合併／部署，備份與新增排程未啟用，03:00仍只是catalog。不能以CYACC既有成功替代Web自己的provider／restore驗收。
