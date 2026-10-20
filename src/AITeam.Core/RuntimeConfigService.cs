@@ -4,9 +4,81 @@ using AITeam.Models;
 
 namespace AITeam.Services;
 
-public sealed record WorkflowSettings(int MaxRepairRounds, int MaxCiRepairRounds = 3)
+public sealed record WorkflowSettings(int MaxRepairRounds, int MaxCiRepairRounds = 3, RoleOrder? Roles = null)
 {
     public static readonly WorkflowSettings Default = new(3, 3);
+
+    /// <summary>設定檔沒寫分工時用預設分工。</summary>
+    public RoleOrder EffectiveRoles => Roles ?? RoleOrder.Default;
+}
+
+/// <summary>
+/// 修改管線五個角色各自的人選順序：排在前面的優先，沒上線就往後找。
+///
+/// 預設分工的原則是看成本：Claude 額度最貴、GPT 其次、Gemini 最便宜但實作能力有限。
+/// 所以便宜的做大量閱讀（偵察、挑戰），GPT 做最吃額度的實作，Claude 只做份量少
+/// 但需要判斷的規劃與最終審查。Gemini 一律排在實作候補的最後：它最慢，而實作會在
+/// 修正與 CI 修正裡被反覆呼叫，Google 也明講不要用 Antigravity 跑大量自動迴圈。
+/// </summary>
+public sealed record RoleOrder(
+    IReadOnlyList<ProviderId> Scout,
+    IReadOnlyList<ProviderId> Planner,
+    IReadOnlyList<ProviderId> Implementer,
+    IReadOnlyList<ProviderId> Challenger,
+    IReadOnlyList<ProviderId> FinalReviewer)
+{
+    public static readonly RoleOrder Default = new(
+        Scout: new[] { ProviderId.Antigravity, ProviderId.Codex, ProviderId.Claude },
+        Planner: new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity },
+        Implementer: new[] { ProviderId.Codex, ProviderId.Claude, ProviderId.Antigravity },
+        Challenger: new[] { ProviderId.Antigravity, ProviderId.Claude, ProviderId.Codex },
+        FinalReviewer: new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity });
+
+    /// <summary>
+    /// 把設定檔裡的一串名字變成人選順序。認不得的名字略過、重複的只算一次；
+    /// 沒寫到的 AI 照預設順序補在最後——寫漏一家不該讓它永遠不會被選到，
+    /// 否則其他人沒上線時，任務會因為「找不到可用 AI」而失敗。
+    /// </summary>
+    internal static IReadOnlyList<ProviderId> Normalise(IEnumerable<string?> names, IReadOnlyList<ProviderId> fallback)
+    {
+        var result = new List<ProviderId>();
+        foreach (var name in names)
+        {
+            if (TryParseProvider(name, out var provider) && !result.Contains(provider))
+                result.Add(provider);
+        }
+
+        foreach (var provider in fallback)
+        {
+            if (!result.Contains(provider)) result.Add(provider);
+        }
+
+        return result;
+    }
+
+    /// <summary>設定檔裡可以寫產品名，也可以寫 AITeam 介面上看到的名字。</summary>
+    internal static bool TryParseProvider(string? name, out ProviderId provider)
+    {
+        switch ((name ?? "").Trim().ToLowerInvariant())
+        {
+            case "claude":
+                provider = ProviderId.Claude;
+                return true;
+            case "codex":
+            case "gpt":
+            case "openai":
+                provider = ProviderId.Codex;
+                return true;
+            case "antigravity":
+            case "agy":
+            case "gemini":
+                provider = ProviderId.Antigravity;
+                return true;
+            default:
+                provider = default;
+                return false;
+        }
+    }
 }
 
 public sealed record AgentsConfig(
@@ -71,9 +143,13 @@ public sealed class RuntimeConfigService
 
         var maxRepairRounds = WorkflowSettings.Default.MaxRepairRounds;
         var maxCiRepairRounds = WorkflowSettings.Default.MaxCiRepairRounds;
+        RoleOrder? roles = null;
         if (document.RootElement.TryGetProperty("workflow", out var workflow) &&
             workflow.ValueKind == JsonValueKind.Object)
         {
+            if (workflow.TryGetProperty("roles", out var rolesElement) && rolesElement.ValueKind == JsonValueKind.Object)
+                roles = ParseRoles(rolesElement);
+
             if (workflow.TryGetProperty("max_repair_rounds", out var value) &&
                 value.ValueKind == JsonValueKind.Number &&
                 value.TryGetInt32(out var parsed) &&
@@ -91,7 +167,28 @@ public sealed class RuntimeConfigService
             }
         }
 
-        return new WorkflowSettings(maxRepairRounds, maxCiRepairRounds);
+        return new WorkflowSettings(maxRepairRounds, maxCiRepairRounds, roles);
+    }
+
+    private static RoleOrder ParseRoles(JsonElement roles)
+    {
+        IReadOnlyList<ProviderId> Read(string key, IReadOnlyList<ProviderId> fallback)
+        {
+            if (!roles.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Array)
+                return fallback;
+            var names = value.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString());
+            return RoleOrder.Normalise(names, fallback);
+        }
+
+        var defaults = RoleOrder.Default;
+        return new RoleOrder(
+            Read("scout", defaults.Scout),
+            Read("planner", defaults.Planner),
+            Read("implementer", defaults.Implementer),
+            Read("challenger", defaults.Challenger),
+            Read("final_reviewer", defaults.FinalReviewer));
     }
 
     internal static AgentsConfig ParseAgentsConfig(string json)

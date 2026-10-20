@@ -233,4 +233,57 @@ public sealed class RuntimeConfigServiceFileResolutionTests : IDisposable
         // hide_cli_console 也不該讓整個檔案讀不起來。
         Assert.Null(new AppPreferencesService(_root).Load().DecisionWriter);
     }
+
+    [Fact]
+    public void DefaultRoles_FollowTheCostPrinciple()
+    {
+        // 便宜的做大量閱讀、GPT 做最吃額度的實作、最貴的 Claude 只做規劃與最終審查。
+        var roles = WorkflowSettings.Default.EffectiveRoles;
+
+        Assert.Equal(ProviderId.Antigravity, roles.Scout[0]);
+        Assert.Equal(ProviderId.Claude, roles.Planner[0]);
+        Assert.Equal(ProviderId.Codex, roles.Implementer[0]);
+        Assert.Equal(ProviderId.Antigravity, roles.Challenger[0]);
+        Assert.Equal(ProviderId.Claude, roles.FinalReviewer[0]);
+        // Gemini 最慢，而且實作會在修正迴圈裡被反覆呼叫：永遠排最後。
+        Assert.Equal(ProviderId.Antigravity, roles.Implementer[^1]);
+    }
+
+    [Fact]
+    public void SettingsWithoutRoles_UseTheDefaults()
+    {
+        var settings = RuntimeConfigService.ParseWorkflowSettings("""{ "workflow": { "max_repair_rounds": 2 } }""");
+
+        Assert.Same(RoleOrder.Default, settings.EffectiveRoles);
+    }
+
+    [Fact]
+    public void RolesCanBeWrittenWithTheNamesShownInTheApp()
+    {
+        var settings = RuntimeConfigService.ParseWorkflowSettings(
+            """{ "workflow": { "roles": { "implementer": ["claude", "gpt", "gemini"] } } }""");
+
+        Assert.Equal(new[] { ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity }, settings.EffectiveRoles.Implementer);
+        // 沒寫到的角色維持預設。
+        Assert.Equal(RoleOrder.Default.Planner, settings.EffectiveRoles.Planner);
+    }
+
+    [Fact]
+    public void AnAiLeftOutOfARole_IsStillAppendedAsALastResort()
+    {
+        // 只寫了一家：其他兩家照預設順序補在後面，不然那家沒上線時任務會直接失敗。
+        var settings = RuntimeConfigService.ParseWorkflowSettings(
+            """{ "workflow": { "roles": { "planner": ["gpt"] } } }""");
+
+        Assert.Equal(new[] { ProviderId.Codex, ProviderId.Claude, ProviderId.Antigravity }, settings.EffectiveRoles.Planner);
+    }
+
+    [Fact]
+    public void UnknownAndDuplicateNames_AreIgnored()
+    {
+        var settings = RuntimeConfigService.ParseWorkflowSettings(
+            """{ "workflow": { "roles": { "scout": ["copilot", "gemini", "agy", "claude"] } } }""");
+
+        Assert.Equal(new[] { ProviderId.Antigravity, ProviderId.Claude, ProviderId.Codex }, settings.EffectiveRoles.Scout);
+    }
 }
