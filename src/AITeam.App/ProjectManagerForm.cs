@@ -19,6 +19,7 @@ public sealed class ProjectManagerForm : Form
     private static readonly Font ListItemSelectedFont = new("Microsoft JhengHei UI", 9.5F, FontStyle.Bold);
 
     private readonly ProjectRegistryService _registry;
+    private readonly string _runtimeRoot;
     private readonly KnownRepositoryService _knownRepos;
     private readonly GitRepositoryService _git;
     private readonly CancellationTokenSource _cts = new();
@@ -57,6 +58,7 @@ public sealed class ProjectManagerForm : Form
     public ProjectManagerForm(string runtimeRoot, ProjectRegistryService registry, ProjectEntry? selectedProject)
     {
         _registry = registry;
+        _runtimeRoot = runtimeRoot;
         _knownRepos = new KnownRepositoryService(runtimeRoot);
         _git = new GitRepositoryService(runtimeRoot, new ProcessRunner());
 
@@ -91,8 +93,9 @@ public sealed class ProjectManagerForm : Form
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         Controls.Add(shell);
 
-        var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
+        var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.Controls.Add(new Label
         {
@@ -103,9 +106,15 @@ public sealed class ProjectManagerForm : Form
             Margin = new Padding(0, 0, 0, 14)
         }, 0, 0);
 
+        var importButton = MakeSecondaryButton("從 GitHub 匯入", 140);
+        importButton.ForeColor = Accent;
+        importButton.Margin = new Padding(0, 0, 8, 0);
+        importButton.Click += (_, _) => ImportFromGitHub();
+        header.Controls.Add(importButton, 1, 0);
+
         ConfigurePrimaryButton(_newButton, "＋ 新增專案", 120);
         _newButton.Click += (_, _) => StartNewProject();
-        header.Controls.Add(_newButton, 1, 0);
+        header.Controls.Add(_newButton, 2, 0);
         shell.Controls.Add(header, 0, 0);
 
         var content = new TableLayoutPanel
@@ -604,6 +613,20 @@ public sealed class ProjectManagerForm : Form
         {
             _suppressSelection = false;
         }
+    }
+
+    private void ImportFromGitHub()
+    {
+        using var dialog = new GitHubImportDialog(_runtimeRoot, _registry);
+        dialog.ShowDialog(this);
+
+        foreach (var repo in dialog.LoadedRepos) _knownRepos.Remember(repo, _registry.Load());
+        PopulateKnownRepos();
+        if (dialog.ImportedNames.Count == 0) return;
+
+        _changed = true;
+        SavedProjectName = dialog.ImportedNames[0];
+        RefreshProjectList(dialog.ImportedNames[0]);
     }
 
     private void PopulateKnownRepos()
