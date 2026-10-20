@@ -225,7 +225,6 @@ public sealed class ProviderHealthService
         TimeSpan duration,
         int? exitCode = null)
     {
-        var lower = Normalize(text);
         // 不管分類成哪一種狀態，CLI 原文都要一起帶回去；畫面只顯示分類後的短句，
         // 原文則寫進執行紀錄，分類判斷萬一有漏，使用者至少看得到 CLI 真正說了什麼。
         // CLI 用 JSON 回報時，先把裡面真正的錯誤訊息挑出來，不然紀錄裡只看得到一堆欄位。
@@ -234,7 +233,12 @@ public sealed class ProviderHealthService
             ? (exitCode is null ? "" : $"exit {exitCode}｜") + string.Join("｜", messages)
             : Summarize(text, exitCode);
 
-        if (LooksLikeQuota(text) || ContainsAny(lower, "credit", "try again at", "resets at", "resets on"))
+        // 有挑出錯誤訊息時只看訊息本身：原始 JSON 裡的欄位名稱（例如 rate_limit 之類的統計欄位）
+        // 會讓「登入過期」被誤判成「超過限額」。
+        var judged = messages.Count > 0 ? string.Join("\n", messages) : text;
+        var lower = Normalize(judged);
+
+        if (LooksLikeQuota(judged) || ContainsAny(lower, "credit", "try again at", "resets at", "resets on", "resets in"))
         {
             return new ProviderHealth(provider, ProviderHealthState.Quota, "超過限額", duration, detail);
         }
@@ -246,6 +250,10 @@ public sealed class ProviderHealthService
                 "unauthorized",
                 "authentication",
                 "auth required",
+                "failed to authenticate",
+                "oauth",
+                "session expired",
+                "please run /login",
                 "credential"))
         {
             return new ProviderHealth(provider, ProviderHealthState.AuthenticationRequired, "需要重新登入", duration, detail);
@@ -309,7 +317,7 @@ public sealed class ProviderHealthService
 
         if (flattened.Length > max)
         {
-            flattened = flattened[..max] + "…";
+            flattened = flattened[..max] + "（後面省略）";
         }
 
         if (flattened.Length == 0)
@@ -359,6 +367,11 @@ public sealed class ProviderHealthService
         foreach (var raw in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
         {
             var line = raw.Trim();
+            if (line.StartsWith("error:", StringComparison.OrdinalIgnoreCase))
+            {
+                AddPlainError(line, messages);
+                continue;
+            }
             if (!line.StartsWith('{')) continue;
             try
             {
@@ -400,6 +413,23 @@ public sealed class ProviderHealthService
             else if (error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var inner) && inner.ValueKind == JsonValueKind.String)
                 messages.Add(inner.GetString()!.Trim());
         }
+    }
+
+    /// <summary>
+    /// 純文字的「error: …」行（Antigravity 就是這樣回報），後面常接著一段給程式看的 JSON，
+    /// 只留前面給人看的句子。不是 CLI 參數錯誤的那種 error（交給精簡參數重試判斷）。
+    /// </summary>
+    private static void AddPlainError(string line, List<string> messages)
+    {
+        if (LooksLikeUnsupportedArgument(line)) return;
+        var text = line["error:".Length..];
+        var json = text.IndexOf('{');
+        if (json >= 0) text = text[..json];
+        text = text.Trim();
+        // 去掉接在 JSON 前面的標籤，例如「AGY_ERROR:」。
+        var lastSpace = text.LastIndexOf(' ');
+        if (text.EndsWith(':') && lastSpace > 0) text = text[..lastSpace].Trim();
+        if (text.Length > 0) messages.Add(text);
     }
 
     /// <summary>訊息本身可能又是一段 JSON（API 的錯誤回應），能拆就再拆一層。</summary>
