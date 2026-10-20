@@ -98,10 +98,10 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $folderName = "AITeam-$version-win-x64"
+          # zip 檔名帶版號；裡面固定是一層 AITeam 資料夾（自動更新也認這個名字）。
           $packageRoot = ".\artifacts\package"
-          $packageDir = Join-Path $packageRoot $folderName
-          $zip = ".\artifacts\$folderName.zip"
+          $packageDir = Join-Path $packageRoot "AITeam"
+          $zip = ".\artifacts\AITeam-V$version.zip"
 
           Remove-Item -LiteralPath $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
@@ -113,8 +113,8 @@ jobs:
           AITeam v$version
 
           直接雙擊 AITeam.exe 即可執行，不需要另外安裝 .NET。
-          這個資料夾就是 AITeam 的家：專案清單、Repo、紀錄都放在這裡，整個資料夾可以搬到別台電腦。
-          如果這台電腦已經有舊的 D:\AITeam，會先沿用那裡的資料；把 AITeam.exe 放進 D:\AITeam，它就成為可攜的家。
+          這個 AITeam 資料夾就是 AITeam 的家：專案清單、Repo、紀錄都放在這裡，整個資料夾可以搬到別台電腦。
+          已經有舊的 D:\AITeam：解壓縮時目的地選 D:\，覆蓋 AITeam.exe 即可，原本的資料都不用動。
           之後有新版會自動更新。
           "@
           [System.IO.File]::WriteAllText(
@@ -128,9 +128,9 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $zip = "artifacts/AITeam-$version-win-x64.zip"
+          $zip = "artifacts/AITeam-V$version.zip"
           $sha256 = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower()
-          "$sha256  AITeam-$version-win-x64.zip" | Out-File -Encoding ascii "artifacts/AITeam-$version-win-x64.zip.sha256"
+          "$sha256  AITeam-V$version.zip" | Out-File -Encoding ascii "artifacts/AITeam-V$version.zip.sha256"
 
       - name: Tag release commit
         shell: pwsh
@@ -149,7 +149,7 @@ jobs:
           $tag = "${{ steps.version.outputs.tag }}"
           $version = "${{ steps.version.outputs.version }}"
           gh release create $tag `
-            "artifacts/AITeam-$version-win-x64.zip" `
-            "artifacts/AITeam-$version-win-x64.zip.sha256" `
+            "artifacts/AITeam-V$version.zip" `
+            "artifacts/AITeam-V$version.zip.sha256" `
             --title "AITeam $tag" `
             --notes-file "docs/V$version.md"

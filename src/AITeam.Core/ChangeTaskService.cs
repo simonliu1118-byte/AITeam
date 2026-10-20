@@ -658,6 +658,7 @@ public sealed class ChangeTaskService
     {
         if (!_interaction.PauseAfterImplement) return;
 
+        if (diffBase is null) await IncludeNewFilesAsync(worktreeRoot, cancellationToken);
         var stat = await RunGitAsync(
             worktreeRoot,
             diffBase is null
@@ -698,7 +699,8 @@ public sealed class ChangeTaskService
             return;
         }
 
-        var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--check" }, cancellationToken);
+        // 空白檢查只看「修改既有檔案」：新檔案（例如 Markdown 行尾刻意留的空白）一向不在這裡擋。
+        var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--check", "--diff-filter=M" }, cancellationToken);
         if (diffCheck.ExitCode != 0)
             throw new InvalidOperationException("Verification 失敗（git diff HEAD --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
 
@@ -709,7 +711,7 @@ public sealed class ChangeTaskService
 
     /// <summary>
     /// ChatGPT 人工接續時的檢查：改動已經 commit 了，所以跟任務起點比。
-    /// 空白檢查只看「修改既有檔案」，跟平常一樣（平常新檔案還沒被 git 追蹤，也不會被檢查到）。
+    /// 空白檢查只看「修改既有檔案」，新檔案交給 ChatGPT 自己負責，不在這裡擋。
     /// </summary>
     private async Task VerifyAgainstBaseAsync(string worktreeRoot, string diffBase, CancellationToken cancellationToken)
     {
@@ -1025,6 +1027,7 @@ public sealed class ChangeTaskService
     /// </param>
     private async Task<string> GetDiffAsync(string worktreeRoot, CancellationToken cancellationToken, string? diffBase = null)
     {
+        if (diffBase is null) await IncludeNewFilesAsync(worktreeRoot, cancellationToken);
         var args = diffBase is null
             ? new[] { "diff", "--no-ext-diff", "--unified=3" }
             : new[] { "diff", "--no-ext-diff", "--unified=3", diffBase, "--", ".", ChatHandoff.ExcludeWorkOrders };
@@ -1033,6 +1036,14 @@ public sealed class ChangeTaskService
         const int max = 120_000;
         return text.Length <= max ? text : text[..max] + "\n[diff truncated by AITeam]";
     }
+
+    /// <summary>
+    /// AI 新建立的檔案還沒被 git 追蹤，git diff 看不到它的內容，審查的 AI 就等於沒看到。
+    /// 先標記成「打算加入」（不會真的 stage 內容），之後的 diff、空白檢查、變更摘要就都會包含新檔案。
+    /// .gitignore 排除的檔案不受影響。
+    /// </summary>
+    private async Task IncludeNewFilesAsync(string worktreeRoot, CancellationToken cancellationToken) =>
+        await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--intent-to-add", "--all" }, cancellationToken);
 
     private async Task<string> RunReadOnlyAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken) =>
         await RunWithNotesAsync(provider, workingDirectory, prompt, false, cancellationToken);

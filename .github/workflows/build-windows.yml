@@ -58,8 +58,9 @@ jobs:
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid VERSION: $version" }
           if ($build -notmatch '^\d+$') { throw "Invalid BUILD: $build" }
 
+          # 使用者看到的版本格式：VX.Y.Z，BUILD > 0 時加上 Build N（共通規則 §6）。
           $display = "V$version"
-          $fileLabel = "v$version"
+          $fileLabel = "V$version"
           if ([int]$build -gt 0) {
             $display = "$display Build $build"
             $fileLabel = "$fileLabel-Build$build"
@@ -101,18 +102,15 @@ jobs:
             throw "Single-file publish produced loose DLL files: $($unexpectedDlls.Name -join ', ')"
           }
 
-      - name: Create clean engineering ZIP package
+      - name: Create clean engineering package
         shell: pwsh
         run: |
-          $fileLabel = "${{ steps.version.outputs.file_label }}"
           $display = "${{ steps.version.outputs.display }}"
-          $folderName = "AITeam-$fileLabel-win-x64"
+          # 下載的 Artifact 本身就是 zip，裡面直接放一層 AITeam 資料夾：解壓縮一次就是 AITeam 的家。
           $packageRoot = ".\artifacts\package"
-          $packageDir = Join-Path $packageRoot $folderName
-          $zip = ".\artifacts\$folderName.zip"
+          $packageDir = Join-Path $packageRoot "AITeam"
 
           Remove-Item -LiteralPath $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
           Copy-Item -LiteralPath .\artifacts\publish\AITeam.exe -Destination (Join-Path $packageDir "AITeam.exe") -Force
 
@@ -121,7 +119,8 @@ jobs:
 
           Engineering / verification build.
           直接雙擊 AITeam.exe 即可執行，不需要另外安裝 .NET。
-          放在已經有 data 資料夾的地方（例如 D:\AITeam），就會沿用那裡的專案與設定。
+          這個 AITeam 資料夾就是 AITeam 的家：專案清單、Repo、紀錄都放在這裡。
+          已經有舊的 D:\AITeam：解壓縮時目的地選 D:\，覆蓋 AITeam.exe 即可，原本的資料都不用動。
           GitHub workflow run: $env:GITHUB_RUN_NUMBER
           Commit: $env:GITHUB_SHA
           "@
@@ -130,12 +129,10 @@ jobs:
             $note.Trim() + [Environment]::NewLine,
             (New-Object System.Text.UTF8Encoding($true)))
 
-          Compress-Archive -Path $packageDir -DestinationPath $zip -CompressionLevel Optimal
-
       - name: Upload engineering artifact
         uses: actions/upload-artifact@v7
         with:
-          name: AITeam-${{ steps.version.outputs.file_label }}-win-x64-run${{ github.run_number }}
-          path: artifacts/AITeam-${{ steps.version.outputs.file_label }}-win-x64.zip
+          name: AITeam-${{ steps.version.outputs.file_label }}
+          path: artifacts/package/
           if-no-files-found: error
           retention-days: 14

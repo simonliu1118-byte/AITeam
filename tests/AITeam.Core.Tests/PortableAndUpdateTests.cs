@@ -94,7 +94,7 @@ public sealed class PortableAndUpdateTests : IDisposable
     private static string Release(string tag, bool draft = false, bool pre = false, bool withAssets = true, string? zipName = null)
     {
         var version = tag.TrimStart('v');
-        var zip = zipName ?? $"AITeam-{version}-win-x64.zip";
+        var zip = zipName ?? $"AITeam-V{version}.zip";
         var assets = withAssets
             ? $$"""[{"name":"{{zip}}","browser_download_url":"https://github.com/simonliu1118-byte/AITeam/releases/download/{{tag}}/{{zip}}"},{"name":"{{zip}}.sha256","browser_download_url":"https://github.com/simonliu1118-byte/AITeam/releases/download/{{tag}}/{{zip}}.sha256"}]"""
             : "[]";
@@ -110,7 +110,8 @@ public sealed class PortableAndUpdateTests : IDisposable
 
         Assert.NotNull(offer);
         Assert.Equal(new Version(0, 35, 0), offer!.Version);
-        Assert.Equal("AITeam-0.35.0-win-x64", offer.PackageFolder);
+        Assert.Equal("AITeam-V0.35.0.zip", offer.ZipName);
+        Assert.Equal("AITeam", offer.PackageFolder);
     }
 
     [Fact]
@@ -124,7 +125,7 @@ public sealed class PortableAndUpdateTests : IDisposable
     [Fact]
     public void DownloadsOnlyFromThisRepositorysOwnRelease()
     {
-        var json = """[{"tag_name":"v1.0.0","assets":[{"name":"AITeam-1.0.0-win-x64.zip","browser_download_url":"https://evil.example/AITeam-1.0.0-win-x64.zip"},{"name":"AITeam-1.0.0-win-x64.zip.sha256","browser_download_url":"https://evil.example/x.sha256"}]}]""";
+        var json = """[{"tag_name":"v1.0.0","assets":[{"name":"AITeam-V1.0.0.zip","browser_download_url":"https://evil.example/AITeam-V1.0.0.zip"},{"name":"AITeam-V1.0.0.zip.sha256","browser_download_url":"https://evil.example/x.sha256"}]}]""";
 
         Assert.Null(AppUpdateCheck.Newest(json, new Version(0, 33, 0)));
     }
@@ -133,9 +134,9 @@ public sealed class PortableAndUpdateTests : IDisposable
     public void ReadsTheChecksumWrittenByTheReleaseWorkflow()
     {
         var hash = new string('a', 64);
-        var text = $"{hash}  AITeam-0.34.0-win-x64.zip\r\n";
+        var text = $"{hash}  AITeam-V0.34.0.zip\r\n";
 
-        Assert.Equal(hash, AppUpdateCheck.ExpectedSha256(text, "AITeam-0.34.0-win-x64.zip"));
+        Assert.Equal(hash, AppUpdateCheck.ExpectedSha256(text, "AITeam-V0.34.0.zip"));
         Assert.Null(AppUpdateCheck.ExpectedSha256(text, "other.zip"));
     }
 
