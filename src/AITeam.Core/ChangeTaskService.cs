@@ -12,6 +12,14 @@ public enum ChangeRisk
     High
 }
 
+/// <summary>AI 的額度用完了。跟一般失敗分開，才能讓使用者選擇換人接手或改由人工接續。</summary>
+public sealed class ProviderQuotaException : InvalidOperationException
+{
+    public ProviderQuotaException(ProviderId provider, string message) : base(message) => Provider = provider;
+
+    public ProviderId Provider { get; }
+}
+
 public enum VersionBump
 {
     None,
@@ -184,6 +192,8 @@ public sealed class ChangeTaskService
         var taskBranch = "aiteam/task-" + taskId;
         var worktreeAdded = false;
         var formalized = false;
+        // GPT / Codex 額度用完、使用者選了「改用 ChatGPT 人工接續」之後才會啟用。
+        var chat = new ChatSession(project, taskId, taskBranch, worktreeRoot);
 
         try
         {
@@ -255,14 +265,26 @@ public sealed class ChangeTaskService
             var implementer = Pick(available, roles.Implementer.ToArray());
             Stage(TaskStage.Implement, "正在實作與測試", implementer);
             progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
-            await RunWriteAsync(
+            (implementer, _) = await RunWriteStepAsync(
+                new WriteStep(
+                    ChatHandoffStep.Implement,
+                    "實作",
+                    BuildImplementPrompt(project, request, scoutReport, plan),
+                    handoff => ChatHandoff.BuildImplementSection(handoff)),
                 implementer,
+                available,
+                roles.Implementer,
+                chat,
                 workingDirectory,
-                BuildImplementPrompt(project, request, scoutReport, plan),
+                scoutReport,
+                plan,
+                request,
+                onStage,
+                progress,
                 cancellationToken);
 
-            await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
-            await RunImplementCheckpointAsync(worktreeRoot, onStage, progress, cancellationToken);
+            await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken, chat.DiffBase(baseSha));
+            await RunImplementCheckpointAsync(worktreeRoot, onStage, progress, cancellationToken, chat.DiffBase(baseSha));
 
             ProviderId challengeProvider = PickDifferent(
                 available,
@@ -310,7 +332,7 @@ public sealed class ChangeTaskService
                 if (degradedReview)
                     progress($"⚠️ {mode.ToFriendlyName()}：本輪 Challenge 與 Final Review 為同一 AI，獨立性下降。");
 
-                var diff = await GetDiffAsync(worktreeRoot, cancellationToken);
+                var diff = await GetDiffAsync(worktreeRoot, cancellationToken, chat.DiffBase(baseSha));
                 Stage(TaskStage.Review, "獨立挑戰目前的修改", roundChallenger, round + 1);
                 progress($"{roundChallenger.ToFriendlyName()}：獨立 Challenge…");
                 var challenge = await RunReadOnlyAsync(
@@ -336,16 +358,39 @@ public sealed class ChangeTaskService
                 if (round == _workflow.MaxRepairRounds)
                     throw new InvalidOperationException($"{_workflow.MaxRepairRounds} 輪修正後 Final Review 仍未通過。工作區已保留供檢查，不會合併或推送。");
 
-                var repairer = available.Contains(implementer)
-                    ? implementer
-                    : Pick(available, roles.Implementer.ToArray());
+                var repairer = chat.Active
+                    ? ProviderId.Codex
+                    : available.Contains(implementer)
+                        ? implementer
+                        : Pick(available, roles.Implementer.ToArray());
                 Stage(TaskStage.Review, "依審查意見修正", repairer, round + 1);
                 progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
-                var repairResult = await RunWriteAsync(
+                var reviewRound = round + 1;
+                var reviewChallenge = challenge;
+                var reviewVerdict = finalReview;
+                var (actualRepairer, repairResult) = await RunWriteStepAsync(
+                    new WriteStep(
+                        ChatHandoffStep.Repair,
+                        $"第 {reviewRound} 輪修正",
+                        BuildRepairPrompt(request, plan, challenge, finalReview),
+                        handoff => ChatHandoff.BuildRepairSection(handoff, reviewRound, reviewChallenge, reviewVerdict),
+                        reviewRound),
                     repairer,
+                    available,
+                    roles.Implementer,
+                    chat,
                     workingDirectory,
-                    BuildRepairPrompt(request, plan, challenge, finalReview),
+                    scoutReport,
+                    plan,
+                    request,
+                    onStage,
+                    progress,
                     cancellationToken);
+                if (actualRepairer != repairer)
+                {
+                    implementer = actualRepairer;
+                    risk = RaiseRiskIfSelfReviewed(actualRepairer, new[] { roundChallenger, roundFinal }, risk, progress);
+                }
 
                 var disputeReason = ParseRepairDispute(repairResult);
                 if (disputeReason is not null)
@@ -368,7 +413,7 @@ public sealed class ChangeTaskService
                     continue;
                 }
 
-                await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+                await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken, chat.DiffBase(baseSha));
             }
 
             var confirmedBump = ParseVersionBumpConfirm(finalReview);
@@ -382,7 +427,16 @@ public sealed class ChangeTaskService
                 project, workingDirectory, bump, firstRelease: startingVersion is not null, cancellationToken);
             progress($"版本：{newVersion}（未來正式發布時建議的 tag：{tag}，本次不會自動建立）");
 
-            await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
+            await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken, chat.DiffBase(baseSha));
+            if (chat.Used)
+            {
+                // 工作單是交接用的，不是這次修改的一部分。它會留在這個分支的 commit 紀錄裡，
+                // 但合併進主線的內容不包含它。
+                await RunGitCheckedAsync(
+                    worktreeRoot,
+                    new[] { "rm", "-r", "-q", "--ignore-unmatch", "--", ChatHandoff.WorkOrderPath(taskId) },
+                    cancellationToken);
+            }
             await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
             var status = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
             if (string.IsNullOrWhiteSpace(status.StandardOutput))
@@ -404,6 +458,9 @@ public sealed class ChangeTaskService
                 throw new InvalidOperationException("推送任務分支失敗：" + FirstUsefulLine(pushTask.StandardError, pushTask.StandardOutput));
 
             var prBody = BuildPrBody(request, plan, risk, mode, implementer, lastChallenger, lastFinalReviewer, newVersion, tag);
+            if (chat.Active)
+                prBody += Environment.NewLine + Environment.NewLine
+                    + "> 這次 GPT / Codex 額度用完，實作改由 ChatGPT 聊天人工接續；交接用的工作單保留在這個分支的 commit 紀錄裡，合併內容不包含它。";
             var prNumber = await CreatePullRequestAsync(project, taskBranch, defaultBranch, commitMessage, prBody, cancellationToken);
             var prUrl = $"https://github.com/{project.GitHubRepo}/pull/{prNumber}";
             progress($"已開啟 PR #{prNumber}：{prUrl}");
@@ -442,11 +499,35 @@ public sealed class ChangeTaskService
 
                     Stage(TaskStage.Verify, "依 CI 失敗訊息修正", implementer, ciRound + 1);
                     progress($"CI 檢查失敗；{implementer.ToFriendlyName()} 依失敗訊息進行第 {ciRound + 1} 輪修正…");
-                    await RunWriteAsync(
+                    var ciRoundNumber = ciRound + 1;
+                    var (ciFixer, _) = await RunWriteStepAsync(
+                        new WriteStep(
+                            ChatHandoffStep.CiFix,
+                            $"第 {ciRoundNumber} 輪 CI 修正",
+                            BuildCiRepairPrompt(request, plan, ciSummary),
+                            _ => "",
+                            ciRoundNumber,
+                            ciSummary),
                         implementer,
+                        available,
+                        roles.Implementer,
+                        chat,
                         workingDirectory,
-                        BuildCiRepairPrompt(request, plan, ciSummary),
+                        scoutReport,
+                        plan,
+                        request,
+                        onStage,
+                        progress,
                         cancellationToken);
+                    if (ciFixer != implementer)
+                    {
+                        implementer = ciFixer;
+                        risk = RaiseRiskIfSelfReviewed(ciFixer, new[] { lastChallenger, lastFinalReviewer }, risk, progress);
+                    }
+
+                    // ChatGPT 已經自己 commit、push 到這個分支，AITeam 只是把它拉回來，不用再提交一次。
+                    if (chat.Active) continue;
+
                     await VerifyWorkingTreeAsync(worktreeRoot, progress, cancellationToken);
                     await RunGitCheckedAsync(worktreeRoot, new[] { "add", "--all" }, cancellationToken);
                     var ciFixStatus = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
@@ -572,11 +653,17 @@ public sealed class ChangeTaskService
         string worktreeRoot,
         Action<TaskProgress> onStage,
         Action<string> progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? diffBase = null)
     {
         if (!_interaction.PauseAfterImplement) return;
 
-        var stat = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--stat" }, cancellationToken);
+        var stat = await RunGitAsync(
+            worktreeRoot,
+            diffBase is null
+                ? new[] { "diff", "HEAD", "--stat" }
+                : new[] { "diff", diffBase, "--stat", "--", ".", ChatHandoff.ExcludeWorkOrders },
+            cancellationToken);
         var summary = string.IsNullOrWhiteSpace(stat.StandardOutput)
             ? "（沒有取得變更摘要。）"
             : stat.StandardOutput.Trim();
@@ -601,15 +688,44 @@ public sealed class ChangeTaskService
         }
     }
 
-    private async Task VerifyWorkingTreeAsync(string worktreeRoot, Action<string> progress, CancellationToken cancellationToken)
+    private async Task VerifyWorkingTreeAsync(
+        string worktreeRoot, Action<string> progress, CancellationToken cancellationToken, string? diffBase = null)
     {
         progress("Verification：檢查 Git diff / whitespace / 工作區狀態…");
+        if (diffBase is not null)
+        {
+            await VerifyAgainstBaseAsync(worktreeRoot, diffBase, cancellationToken);
+            return;
+        }
+
         var diffCheck = await RunGitAsync(worktreeRoot, new[] { "diff", "HEAD", "--check" }, cancellationToken);
         if (diffCheck.ExitCode != 0)
             throw new InvalidOperationException("Verification 失敗（git diff HEAD --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
 
         var status = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
         if (string.IsNullOrWhiteSpace(status.StandardOutput))
+            throw new InvalidOperationException("實作階段沒有產生任何變更。");
+    }
+
+    /// <summary>
+    /// ChatGPT 人工接續時的檢查：改動已經 commit 了，所以跟任務起點比。
+    /// 空白檢查只看「修改既有檔案」，跟平常一樣（平常新檔案還沒被 git 追蹤，也不會被檢查到）。
+    /// </summary>
+    private async Task VerifyAgainstBaseAsync(string worktreeRoot, string diffBase, CancellationToken cancellationToken)
+    {
+        var diffCheck = await RunGitAsync(
+            worktreeRoot,
+            new[] { "diff", diffBase, "--check", "--diff-filter=M", "--", ".", ChatHandoff.ExcludeWorkOrders },
+            cancellationToken);
+        if (diffCheck.ExitCode != 0)
+            throw new InvalidOperationException("Verification 失敗（git diff --check）：" + FirstUsefulLine(diffCheck.StandardError, diffCheck.StandardOutput));
+
+        var changed = await RunGitAsync(
+            worktreeRoot,
+            new[] { "diff", "--quiet", diffBase, "--", ".", ChatHandoff.ExcludeWorkOrders },
+            cancellationToken);
+        var status = await RunGitCheckedAsync(worktreeRoot, new[] { "status", "--porcelain" }, cancellationToken);
+        if (changed.ExitCode == 0 && string.IsNullOrWhiteSpace(status.StandardOutput))
             throw new InvalidOperationException("實作階段沒有產生任何變更。");
     }
 
@@ -903,9 +1019,16 @@ public sealed class ChangeTaskService
         return (next, prefix + next);
     }
 
-    private async Task<string> GetDiffAsync(string worktreeRoot, CancellationToken cancellationToken)
+    /// <param name="diffBase">
+    /// null＝平常的情況：改動都還沒 commit，直接看工作區。改用 ChatGPT 人工接續之後，
+    /// 改動是 ChatGPT 自己 commit 上來的，要跟任務起點比，而且要排除工作單。
+    /// </param>
+    private async Task<string> GetDiffAsync(string worktreeRoot, CancellationToken cancellationToken, string? diffBase = null)
     {
-        var result = await RunGitCheckedAsync(worktreeRoot, new[] { "diff", "--no-ext-diff", "--unified=3" }, cancellationToken);
+        var args = diffBase is null
+            ? new[] { "diff", "--no-ext-diff", "--unified=3" }
+            : new[] { "diff", "--no-ext-diff", "--unified=3", diffBase, "--", ".", ChatHandoff.ExcludeWorkOrders };
+        var result = await RunGitCheckedAsync(worktreeRoot, args, cancellationToken);
         var text = result.StandardOutput;
         const int max = 120_000;
         return text.Length <= max ? text : text[..max] + "\n[diff truncated by AITeam]";
@@ -957,6 +1080,283 @@ public sealed class ChangeTaskService
                "The user added the following instructions after this task started. They come from the user and " +
                "take priority over earlier wording that conflicts with them:" + Environment.NewLine + lines;
     }
+
+    /// <summary>一個會改檔案的步驟：實作、依審查修正、依 CI 修正。</summary>
+    private sealed record WriteStep(
+        ChatHandoffStep Kind,
+        string Description,
+        string Prompt,
+        Func<int, string> WorkOrderSection,
+        int Round = 0,
+        string? CiSummary = null);
+
+    /// <summary>這個任務有沒有改用 ChatGPT 人工接續，以及接續到第幾次。</summary>
+    private sealed class ChatSession
+    {
+        public ChatSession(ProjectEntry project, string taskId, string branch, string worktreeRoot)
+        {
+            Project = project;
+            TaskId = taskId;
+            Branch = branch;
+            WorktreeRoot = worktreeRoot;
+        }
+
+        public ProjectEntry Project { get; }
+        public string TaskId { get; }
+        public string Branch { get; }
+        public string WorktreeRoot { get; }
+
+        /// <summary>一旦改成人工接續，這個任務接下來的實作與修正都走交接。</summary>
+        public bool Active { get; set; }
+
+        /// <summary>寫過幾次工作單。寫過就要在合併前把工作單刪掉。</summary>
+        public int Handoffs { get; set; }
+
+        public bool Used => Handoffs > 0;
+        public string WorkOrderPath => ChatHandoff.WorkOrderPath(TaskId);
+
+        /// <summary>人工接續時改動已經 commit 了，比對要從任務起點算；平常就看工作區。</summary>
+        public string? DiffBase(string baseSha) => Active ? baseSha : null;
+    }
+
+    /// <summary>
+    /// 執行一個會改檔案的步驟。平常就是叫 AI 去改；GPT / Codex 額度用完時，問使用者要改用
+    /// 下一家、改由 ChatGPT 聊天人工接續，還是停下來。回傳實際動手的是誰，以及它的回覆。
+    /// </summary>
+    private async Task<(ProviderId Provider, string Output)> RunWriteStepAsync(
+        WriteStep step,
+        ProviderId provider,
+        List<ProviderId> available,
+        IReadOnlyList<ProviderId> implementerOrder,
+        ChatSession chat,
+        string workingDirectory,
+        string scoutReport,
+        string plan,
+        string request,
+        Action<TaskProgress> onStage,
+        Action<string> progress,
+        CancellationToken cancellationToken)
+    {
+        if (chat.Active)
+            return (ProviderId.Codex, await HandOffToChatAsync(step, chat, scoutReport, plan, request, onStage, progress, cancellationToken));
+
+        try
+        {
+            return (provider, await RunWriteAsync(provider, workingDirectory, step.Prompt, cancellationToken));
+        }
+        catch (ProviderQuotaException ex) when (ex.Provider == ProviderId.Codex && _interaction.AskImplementerExhausted is not null)
+        {
+            progress($"⚠️ GPT / Codex 額度用完了（{step.Description}）：{OneLine(ex.Message, 200)}");
+
+            // 這個任務接下來都不能再找 Codex，包括後面挑審查者的時候，否則審查會因為同一個原因失敗。
+            available.Remove(ProviderId.Codex);
+            ProviderId? fallback = TryPickDifferentFromAny(available, new[] { ProviderId.Codex }, implementerOrder, out var next)
+                ? next
+                : null;
+
+            onStage(new TaskProgress(
+                TaskKind.Change, StageFor(step.Kind), TaskActivity.WaitingForUser, "GPT / Codex 額度用完，等你決定怎麼接續"));
+            var choice = await _interaction.AskImplementerExhausted(
+                new ImplementerExhaustedPrompt(ProviderId.Codex, fallback, step.Description, ex.Message),
+                cancellationToken);
+
+            switch (choice)
+            {
+                case ExhaustedChoice.Fallback when fallback is { } substitute:
+                    progress($"改由 {substitute.ToFriendlyName()} 接手{step.Description}…");
+                    return (substitute, await RunWriteAsync(substitute, workingDirectory, step.Prompt, cancellationToken));
+
+                case ExhaustedChoice.ChatHandoff:
+                    chat.Active = true;
+                    progress("改由 ChatGPT 聊天人工接續。這個任務接下來的實作與修正，都會用工作單交接。");
+                    return (ProviderId.Codex, await HandOffToChatAsync(step, chat, scoutReport, plan, request, onStage, progress, cancellationToken));
+
+                default:
+                    throw new InvalidOperationException(
+                        "GPT / Codex 額度用完，依你的選擇停止任務。工作區已保留，額度恢復後可以重新送出。");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把工作交給 ChatGPT 聊天：工作單寫進任務分支、推上 GitHub，等使用者回來說做完了，
+    /// 再把 ChatGPT 推上來的改動拉回工作區。回傳完成回報；回報裡有反駁時，轉成跟 AI 修正者
+    /// 一樣的反駁格式，讓後面的審查流程不用分兩套。
+    /// </summary>
+    private async Task<string> HandOffToChatAsync(
+        WriteStep step,
+        ChatSession chat,
+        string scoutReport,
+        string plan,
+        string request,
+        Action<TaskProgress> onStage,
+        Action<string> progress,
+        CancellationToken cancellationToken)
+    {
+        if (_interaction.AskChatHandoff is null)
+            throw new InvalidOperationException("這個版本的畫面不支援 ChatGPT 人工接續。");
+
+        var root = chat.WorktreeRoot;
+        var project = chat.Project;
+
+        // CI 修正不寫工作單：那時候分支已經開了 PR，再把工作單加回去，就得再刪一次、再跑一次 CI。
+        // 失敗摘要直接寫在交接文字裡。
+        if (step.Kind != ChatHandoffStep.CiFix)
+        {
+            chat.Handoffs++;
+            var file = Path.Combine(root, chat.WorkOrderPath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            var current = File.Exists(file)
+                ? await File.ReadAllTextAsync(file, cancellationToken)
+                : ChatHandoff.BuildWorkOrderHeader(project, chat.TaskId, chat.Branch, request, scoutReport, plan);
+            await File.WriteAllTextAsync(
+                file,
+                current.TrimEnd() + Environment.NewLine + step.WorkOrderSection(chat.Handoffs),
+                new UTF8Encoding(false),
+                cancellationToken);
+            // -f：萬一專案的 .gitignore 剛好擋到這個資料夾，工作單還是要進得了分支。
+            await RunGitCheckedAsync(root, new[] { "add", "-f", "--", chat.WorkOrderPath }, cancellationToken);
+        }
+
+        // 前一個 AI 做到一半的改動（或新專案的資料夾、VERSION）也一起推上去，ChatGPT 才看得到。
+        await RunGitCheckedAsync(root, new[] { "add", "--all" }, cancellationToken);
+        var pending = await RunGitCheckedAsync(root, new[] { "status", "--porcelain" }, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(pending.StandardOutput))
+            await RunGitCheckedAsync(root, new[] { "commit", "-m", $"AITeam: 交接給 ChatGPT（{step.Description}）" }, cancellationToken);
+
+        progress($"推送任務分支 {chat.Branch}，準備交接給 ChatGPT…");
+        await PushTaskBranchAsync(root, chat.Branch, cancellationToken);
+
+        var handoffSha = (await RunGitCheckedAsync(root, new[] { "rev-parse", "HEAD" }, cancellationToken)).StandardOutput.Trim();
+        var text = ChatHandoff.BuildHandoffText(project.GitHubRepo, chat.Branch, chat.WorkOrderPath, step.Kind, step.CiSummary);
+        var url = step.Kind == ChatHandoffStep.CiFix
+            ? ChatHandoff.BranchUrl(project.GitHubRepo, chat.Branch)
+            : ChatHandoff.WorkOrderUrl(project.GitHubRepo, chat.Branch, chat.WorkOrderPath);
+        var remoteRef = $"refs/remotes/origin/{chat.Branch}";
+        string? warning = null;
+
+        while (true)
+        {
+            onStage(new TaskProgress(
+                TaskKind.Change, StageFor(step.Kind), TaskActivity.WaitingForUser,
+                $"等 ChatGPT 完成{step.Description}", ProviderId.Codex, step.Round));
+            progress(warning is null
+                ? $"已交接給 ChatGPT（{step.Description}）。把交接文字貼給 ChatGPT，它做完之後回來按「ChatGPT 已完成」。"
+                : $"還不能繼續：{warning}");
+
+            var answer = await _interaction.AskChatHandoff(
+                new ChatHandoffPrompt(step.Kind, step.Round, text, url, warning), cancellationToken);
+            if (answer == ChatHandoffAnswer.Cancel)
+                throw new InvalidOperationException(
+                    $"你停止了 ChatGPT 交接，任務停止。分支 {chat.Branch} 留在 GitHub 上，可以之後自己處理。");
+
+            await RunGitCheckedAsync(root, new[] { "fetch", "origin", $"+refs/heads/{chat.Branch}:{remoteRef}" }, cancellationToken);
+            var remote = (await RunGitCheckedAsync(root, new[] { "rev-parse", remoteRef }, cancellationToken)).StandardOutput.Trim();
+            if (remote.Equals(handoffSha, StringComparison.OrdinalIgnoreCase))
+            {
+                warning = "分支上還沒有新的 commit。請確認 ChatGPT 有把修改 push 到這個分支，再按一次。";
+                continue;
+            }
+
+            var ancestor = await RunGitAsync(root, new[] { "merge-base", "--is-ancestor", handoffSha, remote }, cancellationToken);
+            if (ancestor.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"分支 {chat.Branch} 的歷史被改寫了（可能有人 force push 或 rebase），AITeam 不會在這種狀態下繼續。分支保留在 GitHub 上。");
+
+            var report = "";
+            if (step.Kind != ChatHandoffStep.CiFix)
+            {
+                var shown = await RunGitAsync(root, new[] { "show", $"{remote}:{chat.WorkOrderPath}" }, cancellationToken);
+                if (shown.ExitCode != 0)
+                {
+                    warning = "分支上找不到工作單了。請 ChatGPT 把工作單還原、填好完成回報之後再 push。";
+                    continue;
+                }
+
+                if (!ChatHandoff.IsLatestReportDone(shown.StandardOutput))
+                {
+                    warning = "工作單最後一段的狀態還不是「已完成」。請 ChatGPT 填好完成回報並 push 之後再按一次。";
+                    continue;
+                }
+
+                report = ChatHandoff.ExtractLatestReport(shown.StandardOutput);
+            }
+
+            await RunGitCheckedAsync(root, new[] { "merge", "--ff-only", remoteRef }, cancellationToken);
+            var restored = await RestoreVersionIfTouchedAsync(root, project, handoffSha, progress, cancellationToken);
+            if (restored && step.Kind == ChatHandoffStep.CiFix)
+            {
+                // CI 修正之後就直接等 CI 了，還原的 VERSION 要馬上推上去，不然 CI 跑的是被改過的版號。
+                await RunGitCheckedAsync(root, new[] { "commit", "-m", "AITeam: 還原 VERSION（版號由 AITeam 管理）" }, cancellationToken);
+                await PushTaskBranchAsync(root, chat.Branch, cancellationToken);
+            }
+
+            progress($"已取回 ChatGPT 在分支 {chat.Branch} 上的修改。");
+            var dispute = ChatHandoff.ExtractDispute(report);
+            if (dispute is not null)
+                return "AITeamRepairStance: DISPUTE" + Environment.NewLine + dispute;
+            return report.Length == 0 ? "（ChatGPT 已完成）" : report;
+        }
+    }
+
+    private async Task PushTaskBranchAsync(string worktreeRoot, string branch, CancellationToken cancellationToken)
+    {
+        var push = await _runner.RunAsync(
+            "git",
+            new[] { "push", "-u", "origin", $"{branch}:refs/heads/{branch}" },
+            worktreeRoot,
+            null,
+            TimeSpan.FromMinutes(2),
+            cancellationToken);
+        if (push.ExitCode != 0)
+            throw new InvalidOperationException("推送任務分支失敗：" + FirstUsefulLine(push.StandardError, push.StandardOutput));
+    }
+
+    /// <summary>
+    /// 版號由 AITeam 管。ChatGPT 就算被交代了還是改了 VERSION，就把它還原。
+    /// 回傳有沒有還原（還原的結果已經放進暫存區，還沒 commit）。
+    /// </summary>
+    private async Task<bool> RestoreVersionIfTouchedAsync(
+        string worktreeRoot, ProjectEntry project, string handoffSha, Action<string> progress, CancellationToken cancellationToken)
+    {
+        var versionPath = string.IsNullOrWhiteSpace(project.RepoSubpath)
+            ? ProjectPreflight.VersionFileName
+            : $"{project.RepoSubpath.Trim('/')}/{ProjectPreflight.VersionFileName}";
+
+        var existed = await RunGitAsync(worktreeRoot, new[] { "cat-file", "-e", $"{handoffSha}:{versionPath}" }, cancellationToken);
+        if (existed.ExitCode != 0) return false;
+
+        var touched = await RunGitAsync(worktreeRoot, new[] { "diff", "--quiet", handoffSha, "HEAD", "--", versionPath }, cancellationToken);
+        if (touched.ExitCode == 0) return false;
+
+        await RunGitCheckedAsync(worktreeRoot, new[] { "checkout", handoffSha, "--", versionPath }, cancellationToken);
+        progress("⚠️ ChatGPT 改了 VERSION 檔；版號由 AITeam 管理，已經還原。");
+        return true;
+    }
+
+    private static TaskStage StageFor(ChatHandoffStep step) => step switch
+    {
+        ChatHandoffStep.Implement => TaskStage.Implement,
+        ChatHandoffStep.Repair => TaskStage.Review,
+        _ => TaskStage.Verify
+    };
+
+    /// <summary>
+    /// 中途換了實作的人，而新的人剛好也是這一輪的審查者，就等於自己審自己。
+    /// 這種時候跟受限模式一樣：風險拉到最高，合併一定要使用者確認。
+    /// </summary>
+    internal static ChangeRisk RaiseRiskIfSelfReviewed(
+        ProviderId fixer, IEnumerable<ProviderId> reviewers, ChangeRisk risk, Action<string> progress)
+    {
+        if (!reviewers.Contains(fixer) || risk == ChangeRisk.High) return risk;
+        progress($"⚠️ {fixer.ToFriendlyName()} 接手修正，但它也是這次的審查者，等於自己審自己；風險等級提升為 HIGH，合併一定要你確認。");
+        return ChangeRisk.High;
+    }
+
+    internal static string? QuotaLine(string text) =>
+        text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => line.Length > 0 && ProviderHealthService.LooksLikeQuota(line));
 
     private async Task<string> RunWriteAsync(ProviderId provider, string workingDirectory, string prompt, CancellationToken cancellationToken)
     {
@@ -1013,7 +1413,13 @@ public sealed class ChangeTaskService
                 _agents.CodexCommand, args, workingDirectory, prompt, TimeSpan.FromMinutes(15), cancellationToken,
                 ActivitySink(ProviderId.Codex));
             if (result.ExitCode != 0)
+            {
+                // 錯誤訊息第一行常常只是 Codex 的版本橫幅，額度用完的那句話在後面，所以整段一起看。
+                var all = $"{result.StandardError}\n{result.StandardOutput}";
+                if (ProviderHealthService.LooksLikeQuota(all))
+                    throw new ProviderQuotaException(ProviderId.Codex, QuotaLine(all) ?? FirstUsefulLine(result.StandardError, result.StandardOutput));
                 throw new InvalidOperationException(FirstUsefulLine(result.StandardError, result.StandardOutput));
+            }
             return File.Exists(lastMessage)
                 ? await File.ReadAllTextAsync(lastMessage, cancellationToken)
                 : result.StandardOutput;
