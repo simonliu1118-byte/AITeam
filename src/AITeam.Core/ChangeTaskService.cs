@@ -210,7 +210,8 @@ public sealed class ChangeTaskService
             if (!hasCi)
                 progress($"⚠️ 目標專案偵測不到 GitHub Actions CI（推測技術棧：{techStackHint}）；本次計畫會一併要求補建最小可用的 CI。");
 
-            var scout = Pick(available, ProviderId.Antigravity, ProviderId.Codex, ProviderId.Claude);
+            var roles = _workflow.EffectiveRoles;
+            var scout = Pick(available, roles.Scout.ToArray());
             Stage(TaskStage.Scout, "讀取專案現況、蒐集證據", scout);
             progress($"{scout.ToFriendlyName()}：Scout / evidence…");
             var scoutReport = await RunReadOnlyAsync(
@@ -219,7 +220,7 @@ public sealed class ChangeTaskService
                 BuildScoutPrompt(project, request),
                 cancellationToken);
 
-            var planner = Pick(available, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude);
+            var planner = Pick(available, roles.Planner.ToArray());
             var (plan, risk, bump) = await RunPlanGateDiscussionAsync(
                 project, request, scoutReport, planner, workingDirectory, hasCi, techStackHint, askUser, progress, onStage, cancellationToken);
 
@@ -251,7 +252,7 @@ public sealed class ChangeTaskService
                 PrepareProjectScaffold(workingDirectory, project, isNewProject, startingVersion);
             }
 
-            var implementer = Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
+            var implementer = Pick(available, roles.Implementer.ToArray());
             Stage(TaskStage.Implement, "正在實作與測試", implementer);
             progress($"{implementer.ToFriendlyName()}：開始實作與測試…");
             await RunWriteAsync(
@@ -266,14 +267,12 @@ public sealed class ChangeTaskService
             ProviderId challengeProvider = PickDifferent(
                 available,
                 implementer,
-                ProviderId.Antigravity,
-                ProviderId.Codex,
-                ProviderId.Claude);
+                roles.Challenger.ToArray());
 
             var degradedReview = !TryPickDifferentFromAny(
                 available,
                 new[] { implementer, challengeProvider },
-                new[] { ProviderId.Codex, ProviderId.Antigravity, ProviderId.Claude },
+                roles.FinalReviewer,
                 out var finalProvider);
             if (degradedReview)
             {
@@ -339,7 +338,7 @@ public sealed class ChangeTaskService
 
                 var repairer = available.Contains(implementer)
                     ? implementer
-                    : Pick(available, ProviderId.Claude, ProviderId.Antigravity, ProviderId.Codex);
+                    : Pick(available, roles.Implementer.ToArray());
                 Stage(TaskStage.Review, "依審查意見修正", repairer, round + 1);
                 progress($"Final Review 要求修正；{repairer.ToFriendlyName()} 進行第 {round + 1} 輪 Repair…");
                 var repairResult = await RunWriteAsync(
