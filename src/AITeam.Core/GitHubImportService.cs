@@ -3,6 +3,15 @@ using AITeam.Models;
 
 namespace AITeam.Services;
 
+/// <summary>這台電腦的 GitHub CLI 還沒登入；畫面上會提供「登入 GitHub」按鈕。</summary>
+public sealed class GitHubLoginRequiredException : InvalidOperationException
+{
+    public GitHubLoginRequiredException()
+        : base("這台電腦的 GitHub 還沒登入。按「登入 GitHub」，在跳出的瀏覽器登入之後就會自動列出你的 Repo。")
+    {
+    }
+}
+
 /// <summary>GitHub 帳號看得到的一個 Repo。</summary>
 public sealed record GitHubRepoListing(string FullName, string Description, bool IsPrivate, bool IsArchived);
 
@@ -64,7 +73,7 @@ public sealed class GitHubImportService
             if (text.Contains("auth login", StringComparison.OrdinalIgnoreCase)
                 || text.Contains("not logged", StringComparison.OrdinalIgnoreCase)
                 || text.Contains("401", StringComparison.Ordinal))
-                throw new InvalidOperationException("GitHub CLI 還沒登入。請先在命令列執行 gh auth login 登入 GitHub，再回來匯入。");
+                throw new GitHubLoginRequiredException();
             throw new InvalidOperationException("列出 GitHub Repo 失敗：" + FirstLine(text));
         }
 

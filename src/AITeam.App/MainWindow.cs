@@ -502,9 +502,12 @@ public sealed partial class MainWindow : Form
 
     private void AddProviderRow(TableLayoutPanel grid, int row, ProviderId provider, string name)
     {
-        var status = new ProviderStatusRow(provider, name);
+        var status = new ProviderStatusRow(
+            provider, name,
+            state => CliMaintenance.For(provider, state, new RuntimeConfigService(_runtimeRoot).LoadAgentsConfig()));
         // 勾選會改變「這一輪有幾個 AI 可用」，把關強度要跟著重算。
         status.SessionEnabledChanged += (_, _) => UpdateReviewModeLabel();
+        status.ActionRequested += async (_, action) => await RunMaintenanceAsync(status, action);
         _providerCards[provider] = status;
         status.AddTo(grid, row);
     }
@@ -768,8 +771,25 @@ public sealed partial class MainWindow : Form
         _projectInfo.Text = $"Repo：{project.GitHubRepo}\r\n本機位置：{project.PhysicalPath}";
     }
 
+    /// <summary>卡片上的「登入」「更新」：開視窗替使用者執行，關掉之後自動重新檢查。</summary>
+    private async Task RunMaintenanceAsync(ProviderStatusRow row, CliMaintenanceAction action)
+    {
+        row.SetActionBusy(true);
+        try
+        {
+            AppendLog($"{action.Title}：已開啟視窗，完成後關閉視窗即可。");
+            if (await CliConsole.RunAsync(this, action.Command, action.Arguments, action.Title))
+                await RecheckProvidersAsync();
+        }
+        finally
+        {
+            row.SetActionBusy(false);
+        }
+    }
+
     private async Task RecheckProvidersAsync()
     {
+        if (!_recheckButton.Enabled) return;
         _recheckButton.Enabled = false;
         AppendLog("開始檢查三個 AI...");
         // 三家都檢查，包含這一輪沒有要用的。狀態是狀態、用不用是用不用，兩件事分開。

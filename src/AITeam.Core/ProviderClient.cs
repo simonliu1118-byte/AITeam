@@ -63,12 +63,16 @@ public sealed class ProviderClient
                 {
                     "--sandbox", "read-only",
                     "--ask-for-approval", "never",
-                    "-c", "model_reasoning_effort=\"medium\"",
+                    "-c", "model_reasoning_effort=\"medium\""
+                }
+                .Concat(CodexModels.Args(_runtimeRoot))
+                .Concat(new[]
+                {
                     "exec",
                     "--skip-git-repo-check",
                     "--output-last-message", lastMessage,
                     "-"
-                },
+                }),
                 workingDirectory,
                 prompt,
                 timeout,

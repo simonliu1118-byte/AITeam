@@ -244,7 +244,11 @@ public sealed class RuntimeConfigService
 /// 程式記下來的使用者偏好（例如上次選了誰整理定案書）。跟 settings.json／agents.json
 /// 不同的是，這份是程式自己寫回去的，不是給人手動編輯的。
 /// </summary>
-public sealed record AppPreferences(ProviderId? DecisionWriter = null)
+/// <param name="CodexModel">
+/// Codex 要用哪個模型。null＝交給 Codex 自己的預設。Codex 的預設模型你的帳號不能用時，
+/// 健康檢查會自動試出一個能用的並記在這裡，之後每次叫 Codex 都指定它。
+/// </param>
+public sealed record AppPreferences(ProviderId? DecisionWriter = null, string? CodexModel = null)
 {
     public static readonly AppPreferences Default = new();
 }
@@ -276,7 +280,8 @@ public sealed class AppPreferencesService
         var payload = new
         {
             schema_version = 1,
-            decision_writer = preferences.DecisionWriter?.ToString()
+            decision_writer = preferences.DecisionWriter?.ToString(),
+            codex_model = preferences.CodexModel
         };
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         File.WriteAllText(
@@ -305,6 +310,15 @@ public sealed class AppPreferencesService
             writer = parsed;
         }
 
-        return new AppPreferences(writer);
+        string? codexModel = null;
+        if (document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("codex_model", out var modelValue) &&
+            modelValue.ValueKind == JsonValueKind.String &&
+            CodexModels.IsValidSlug(modelValue.GetString()))
+        {
+            codexModel = modelValue.GetString();
+        }
+
+        return new AppPreferences(writer, codexModel);
     }
 }

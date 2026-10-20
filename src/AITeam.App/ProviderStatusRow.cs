@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using AITeam.Models;
+using AITeam.Services;
 
 namespace AITeam;
 
@@ -13,13 +14,19 @@ public sealed class ProviderStatusRow
     private readonly Label _statusLabel = new();
     private readonly AutoFitLabel _detailLabel = new();
     private readonly CheckBox _enabledCheck = new();
+    private readonly Button _actionButton = new();
+    private readonly TableLayoutPanel _detailCell = new();
+    private readonly Func<ProviderHealthState, CliMaintenanceAction?> _actionFor;
+    private CliMaintenanceAction? _action;
 
     // 最後一次真正檢查到的狀態。使用者勾不勾「本次使用」都不會動到它。
     private ProviderHealth _health;
 
-    public ProviderStatusRow(ProviderId provider, string name)
+    /// <param name="actionFor">這個狀態下卡片上可以直接按的修復動作（登入、更新），沒有就回 null。</param>
+    public ProviderStatusRow(ProviderId provider, string name, Func<ProviderHealthState, CliMaintenanceAction?> actionFor)
     {
         Provider = provider;
+        _actionFor = actionFor;
 
         _nameLabel.Text = name;
         _nameLabel.AutoSize = true;
@@ -50,6 +57,33 @@ public sealed class ProviderStatusRow
         _detailLabel.BackColor = Color.White;
         _detailLabel.Margin = new Padding(0, 2, 10, 2);
 
+        // 登入過期、CLI 太舊的時候，說明欄右邊多一顆按鈕，按了 AITeam 就替你處理。
+        _actionButton.AutoSize = false;
+        _actionButton.Size = new Size(58, 28);
+        _actionButton.FlatStyle = FlatStyle.Flat;
+        _actionButton.FlatAppearance.BorderColor = Color.FromArgb(43, 108, 176);
+        _actionButton.BackColor = Color.White;
+        _actionButton.ForeColor = Color.FromArgb(43, 108, 176);
+        _actionButton.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold);
+        _actionButton.Anchor = AnchorStyles.Right;
+        _actionButton.Margin = new Padding(0, 4, 10, 4);
+        _actionButton.Visible = false;
+        _actionButton.Click += (_, _) =>
+        {
+            if (_action is not null) ActionRequested?.Invoke(this, _action);
+        };
+
+        _detailCell.Dock = DockStyle.Fill;
+        _detailCell.ColumnCount = 2;
+        _detailCell.RowCount = 1;
+        _detailCell.Margin = Padding.Empty;
+        _detailCell.BackColor = Color.White;
+        _detailCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _detailCell.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _detailCell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        _detailCell.Controls.Add(_detailLabel, 0, 0);
+        _detailCell.Controls.Add(_actionButton, 1, 0);
+
         _enabledCheck.Text = "本次使用";
         _enabledCheck.Checked = true;
         _enabledCheck.AutoSize = true;
@@ -71,13 +105,17 @@ public sealed class ProviderStatusRow
     public bool SessionEnabled => _enabledCheck.Checked;
     public ProviderHealthState State => _health.State;
     public event EventHandler<bool>? SessionEnabledChanged;
+    public event EventHandler<CliMaintenanceAction>? ActionRequested;
+
+    /// <summary>修復動作執行中：按鈕先停用，避免同一個登入視窗被開兩次。</summary>
+    public void SetActionBusy(bool busy) => _actionButton.Enabled = !busy;
 
     public void AddTo(TableLayoutPanel grid, int row)
     {
         grid.Controls.Add(_nameLabel, 0, row);
         grid.Controls.Add(_lamp, 1, row);
         grid.Controls.Add(_statusLabel, 2, row);
-        grid.Controls.Add(_detailLabel, 3, row);
+        grid.Controls.Add(_detailCell, 3, row);
         grid.Controls.Add(_enabledCheck, 4, row);
     }
 
@@ -94,16 +132,25 @@ public sealed class ProviderStatusRow
         _statusLabel.Text = presentation.Status;
         _statusLabel.ForeColor = presentation.Color;
         _detailLabel.Text = SessionEnabled ? presentation.Detail : "本次不使用，狀態仍會持續更新";
+
+        _action = _actionFor(_health.State);
+        _actionButton.Visible = _action is not null;
+        if (_action is not null) _actionButton.Text = _action.ButtonText;
     }
 
-    private static ProviderPresentation GetPresentation(ProviderHealth health) =>
+    private ProviderPresentation GetPresentation(ProviderHealth health) =>
         health.State switch
         {
+            // Antigravity 沒有登入、更新的指令，只能在它自己的程式裡處理。
+            ProviderHealthState.AuthenticationRequired when Provider == ProviderId.Antigravity =>
+                new(Color.FromArgb(48, 116, 181), "需登入", "請打開 Antigravity 程式重新登入"),
+            ProviderHealthState.AuthenticationRequired => new(Color.FromArgb(48, 116, 181), "需登入", "按右邊「登入」，在跳出的瀏覽器登入"),
+            ProviderHealthState.Error when Provider != ProviderId.Antigravity =>
+                new(Color.FromArgb(194, 58, 52), "錯誤", "原因見右側紀錄；可以先按「更新」試試"),
             ProviderHealthState.Unknown => new(Color.FromArgb(145, 153, 163), "待檢查", "尚未取得狀態"),
             ProviderHealthState.Checking => new(Color.FromArgb(214, 158, 46), "檢測中", "正在送出輕量健康檢查"),
             ProviderHealthState.Online => new(Color.FromArgb(46, 160, 92), "上線", "可用"),
             ProviderHealthState.Quota => new(Color.FromArgb(224, 132, 37), "超過限額", "本次工作會自動跳過"),
-            ProviderHealthState.AuthenticationRequired => new(Color.FromArgb(48, 116, 181), "需登入", "請重新完成 CLI 登入"),
             ProviderHealthState.TemporaryError => new(Color.FromArgb(207, 86, 50), "暫時異常", "稍後可重新檢查，原因見右側紀錄"),
             // 「錯誤」是分類不出來時的結果，卡片這一格放不下 CLI 原文（放進來會被縮到看不清楚），
             // 所以這裡只指路，完整原文寫在右側的執行紀錄。

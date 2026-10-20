@@ -125,4 +125,37 @@ public sealed class ProviderHealthClassifyTests
     {
         Assert.Empty(ProviderHealthService.ExtractCliMessages("error: unknown option '--x'"));
     }
+
+    [Fact]
+    public void ExpiredClaudeLogin_IsAuthentication_EvenWhenTheJsonHasRateLimitFields()
+    {
+        var output = """{"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"rate_limit_tier":"default"}}""";
+
+        var health = ProviderHealthService.ClassifyFailure(ProviderId.Claude, output, TimeSpan.Zero, exitCode: 1);
+
+        Assert.Equal(ProviderHealthState.AuthenticationRequired, health.State);
+        Assert.Equal("exit 1｜Failed to authenticate: OAuth session expired and could not be refreshed", health.Detail);
+    }
+
+    [Fact]
+    public void AntigravityPlainError_KeepsTheSentence_AndDropsTheJson()
+    {
+        var output = "error: Individual quota reached. Resets in 97h11m55s. AGY_ERROR: {\"short_error\":\"RESOURCE_EXHAUSTED\"}";
+
+        var health = ProviderHealthService.ClassifyFailure(ProviderId.Antigravity, output, TimeSpan.Zero, exitCode: 3);
+
+        Assert.Equal(ProviderHealthState.Quota, health.State);
+        Assert.Equal("exit 3｜Individual quota reached. Resets in 97h11m55s.", health.Detail);
+    }
+
+    [Fact]
+    public void UnsupportedModelForAccount_IsAnErrorWithItsReason()
+    {
+        var output = """{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-x' model is not supported when using Codex with a ChatGPT account.\"}}"}""";
+
+        var health = ProviderHealthService.ClassifyFailure(ProviderId.Codex, output, TimeSpan.Zero, exitCode: 1);
+
+        Assert.Equal(ProviderHealthState.Error, health.State);
+        Assert.Contains("not supported when using Codex with a ChatGPT account", health.Detail);
+    }
 }
