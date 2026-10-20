@@ -96,4 +96,33 @@ public sealed class ProviderHealthClassifyTests
     {
         Assert.Equal(expected, ProviderHealthService.IsJsonErrorResult(output));
     }
+
+    [Fact]
+    public void CodexJsonErrors_AreTurnedIntoReadableMessages()
+    {
+        var output = string.Join("\n",
+            """{"type":"thread.started","thread_id":"x"}""",
+            """{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `gpt-x` not found."}}""",
+            """{"type":"turn.started"}""",
+            """{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"This model requires a newer version of Codex.\"}}"}""",
+            """{"type":"turn.failed","error":{"message":"This model requires a newer version of Codex."}}""");
+
+        var health = ProviderHealthService.ClassifyFailure(ProviderId.Codex, output, TimeSpan.Zero, exitCode: 1);
+
+        Assert.Equal("exit 1｜Model metadata for `gpt-x` not found.｜This model requires a newer version of Codex.", health.Detail);
+    }
+
+    [Fact]
+    public void ClaudeErrorResult_ShowsItsResultText()
+    {
+        var output = """{"type":"result","subtype":"success","is_error":true,"result":"There's an issue with the selected model.","total_cost_usd":0}""";
+
+        Assert.Equal(new[] { "There's an issue with the selected model." }, ProviderHealthService.ExtractCliMessages(output));
+    }
+
+    [Fact]
+    public void PlainTextOutput_HasNoExtractedMessages()
+    {
+        Assert.Empty(ProviderHealthService.ExtractCliMessages("error: unknown option '--x'"));
+    }
 }

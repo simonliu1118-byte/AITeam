@@ -197,7 +197,9 @@ public sealed class ProviderHealthService
             }
 
             var combined = $"{result.StandardError}\n{result.StandardOutput}";
-            return ClassifyFailure(provider, combined, result.Duration, result.ExitCode);
+            var failure = ClassifyFailure(provider, combined, result.Duration, result.ExitCode);
+            var log = WriteFullOutput(provider, combined);
+            return log is null ? failure : failure with { Detail = $"{failure.Detail}（完整內容：{log}）" };
         }
         catch (FileNotFoundException ex)
         {
@@ -226,7 +228,11 @@ public sealed class ProviderHealthService
         var lower = Normalize(text);
         // 不管分類成哪一種狀態，CLI 原文都要一起帶回去；畫面只顯示分類後的短句，
         // 原文則寫進執行紀錄，分類判斷萬一有漏，使用者至少看得到 CLI 真正說了什麼。
-        var detail = Summarize(text, exitCode);
+        // CLI 用 JSON 回報時，先把裡面真正的錯誤訊息挑出來，不然紀錄裡只看得到一堆欄位。
+        var messages = ExtractCliMessages(text);
+        var detail = messages.Count > 0
+            ? (exitCode is null ? "" : $"exit {exitCode}｜") + string.Join("｜", messages)
+            : Summarize(text, exitCode);
 
         if (LooksLikeQuota(text) || ContainsAny(lower, "credit", "try again at", "resets at", "resets on"))
         {
@@ -342,6 +348,99 @@ public sealed class ProviderHealthService
         "error 429",
         "status 429",
         "http 429");
+
+    /// <summary>
+    /// 從 CLI 的 JSON 輸出挑出給人看的錯誤訊息：Codex 的 error 事件（裡面常常又包一層 API 回應的 JSON）、
+    /// Claude 標了 is_error 的 result。沒有 JSON 或找不到訊息就回空清單。
+    /// </summary>
+    internal static IReadOnlyList<string> ExtractCliMessages(string text)
+    {
+        var messages = new List<string>();
+        foreach (var raw in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = raw.Trim();
+            if (!line.StartsWith('{')) continue;
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                CollectMessages(document.RootElement, messages);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        return messages.Distinct().ToList();
+    }
+
+    private static void CollectMessages(JsonElement element, List<string> messages)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return;
+        var type = element.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+
+        if (type == "error" && element.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+        {
+            AddMessage(message.GetString()!, messages);
+            return;
+        }
+
+        if (element.TryGetProperty("item", out var item)) CollectMessages(item, messages);
+
+        if (element.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True)
+        {
+            if (element.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(result.GetString()))
+                AddMessage(result.GetString()!, messages);
+            else if (element.TryGetProperty("subtype", out var subtype) && subtype.ValueKind == JsonValueKind.String)
+                messages.Add(subtype.GetString()!);
+        }
+
+        if (element.TryGetProperty("error", out var error))
+        {
+            if (error.ValueKind == JsonValueKind.String) AddMessage(error.GetString()!, messages);
+            else if (error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var inner) && inner.ValueKind == JsonValueKind.String)
+                messages.Add(inner.GetString()!.Trim());
+        }
+    }
+
+    /// <summary>訊息本身可能又是一段 JSON（API 的錯誤回應），能拆就再拆一層。</summary>
+    private static void AddMessage(string message, List<string> messages)
+    {
+        var trimmed = message.Trim();
+        if (trimmed.StartsWith('{'))
+        {
+            try
+            {
+                using var nested = JsonDocument.Parse(trimmed);
+                var before = messages.Count;
+                CollectMessages(nested.RootElement, messages);
+                if (messages.Count > before) return;
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        if (trimmed.Length > 0) messages.Add(trimmed);
+    }
+
+    /// <summary>
+    /// 健康檢查失敗時，把 CLI 的完整輸出存到 logs 資料夾（每家一個檔，只留最後一次），
+    /// 紀錄裡只放整理過的重點，需要時再打開這個檔看全文。寫不進去就算了，不影響檢查結果。
+    /// </summary>
+    private string? WriteFullOutput(ProviderId provider, string output)
+    {
+        try
+        {
+            var directory = Path.Combine(_runtimeRoot, "logs");
+            Directory.CreateDirectory(directory);
+            var name = $"health-{provider.ToString().ToLowerInvariant()}.log";
+            File.WriteAllText(Path.Combine(directory, name), $"[{DateTimeOffset.Now:O}]\r\n{output.Trim()}\r\n");
+            return Path.Combine("logs", name);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     internal static bool IsJsonErrorResult(string output)
     {
