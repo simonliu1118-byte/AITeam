@@ -4,7 +4,7 @@ using AITeam.Services;
 
 namespace AITeam;
 
-public sealed class MainWindow : Form
+public sealed partial class MainWindow : Form
 {
     private static readonly Color AppBackground = Color.FromArgb(244, 247, 250);
     private static readonly Color CardBackground = Color.White;
@@ -90,6 +90,7 @@ public sealed class MainWindow : Form
         _clockTimer.Tick += (_, _) => UpdateClock();
 
         Shown += async (_, _) => await RecheckProvidersAsync();
+        Shown += (_, _) => StartUpdateChecks();
         FormClosing += OnFormClosing;
     }
 

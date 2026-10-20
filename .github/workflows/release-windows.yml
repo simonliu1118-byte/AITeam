@@ -32,6 +32,9 @@ jobs:
         run: |
           $version = (Get-Content -LiteralPath .\VERSION -Raw).Trim()
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid VERSION: $version" }
+          $build = (Get-Content -LiteralPath .\BUILD -Raw).Trim()
+          if ($build -notmatch '^\d+$' -or [int]$build -ne 0) { throw "Formal release requires BUILD=0; got $build. Confirm the release identity with the user first." }
+          if (-not (Test-Path -LiteralPath ".\docs\V$version.md")) { throw "docs\V$version.md is missing; every formal release keeps its change summary." }
           $tag = "v$version"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
@@ -110,7 +113,9 @@ jobs:
           AITeam v$version
 
           直接雙擊 AITeam.exe 即可執行，不需要另外安裝 .NET。
-          正式版會沿用 D:\AITeam 的既有專案與設定資料。
+          這個資料夾就是 AITeam 的家：專案清單、Repo、紀錄都放在這裡，整個資料夾可以搬到別台電腦。
+          如果這台電腦已經有舊的 D:\AITeam，會先沿用那裡的資料；把 AITeam.exe 放進 D:\AITeam，它就成為可攜的家。
+          之後有新版會自動更新。
           "@
           [System.IO.File]::WriteAllText(
             (Join-Path $packageDir "使用說明.txt"),
@@ -147,4 +152,4 @@ jobs:
             "artifacts/AITeam-$version-win-x64.zip" `
             "artifacts/AITeam-$version-win-x64.zip.sha256" `
             --title "AITeam $tag" `
-            --generate-notes
+            --notes-file "docs/V$version.md"

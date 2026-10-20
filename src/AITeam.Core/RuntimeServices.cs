@@ -4,23 +4,44 @@ using AITeam.Models;
 
 namespace AITeam.Services;
 
+/// <summary>
+/// AITeam 的「家」：專案清單、從 GitHub 抓下來的 Repo、工作區、歷史紀錄都放在這裡。
+///
+/// 可攜：從 GitHub Release 下載解壓到任何資料夾，那個資料夾就是家，整個資料夾搬到別台電腦
+/// 照樣能用。以前只要電腦上有 D:\AITeam 就一定用它，等於綁死在 D 槽。
+/// </summary>
 public static class RuntimeRootResolver
 {
-    public static string Resolve()
-    {
-        var env = Environment.GetEnvironmentVariable("AITEAM_ROOT");
-        if (!string.IsNullOrWhiteSpace(env)) return Path.GetFullPath(env);
+    public const string LegacyRoot = @"D:\AITeam";
 
-        var baseDir = Path.GetFullPath(AppContext.BaseDirectory);
-        var trimmed = baseDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (Path.GetFileName(trimmed).Equals("current", StringComparison.OrdinalIgnoreCase))
+    public static string Resolve() => Resolve(
+        Environment.GetEnvironmentVariable("AITEAM_ROOT"),
+        Path.GetFullPath(AppContext.BaseDirectory),
+        Directory.Exists);
+
+    /// <summary>
+    /// 順序：
+    /// 1. 環境變數 AITEAM_ROOT（測試或特殊安排用）。
+    /// 2. exe 放在名為 current 的資料夾裡：家是上一層（舊的安裝方式）。
+    /// 3. exe 旁邊已經有 data 資料夾：這個資料夾就是家（可攜）。
+    /// 4. 這台電腦有舊的 D:\AITeam：沿用它，既有的專案和紀錄才不會「不見」。
+    ///    想讓它變成可攜的，把新的 AITeam.exe 放進 D:\AITeam 就好。
+    /// 5. 其他情況：exe 所在的資料夾就是家，第一次啟動時會在這裡建 data。
+    /// </summary>
+    internal static string Resolve(string? environmentRoot, string baseDirectory, Func<string, bool> directoryExists)
+    {
+        if (!string.IsNullOrWhiteSpace(environmentRoot)) return Path.GetFullPath(environmentRoot);
+
+        var baseDir = baseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (Path.GetFileName(baseDir).Equals("current", StringComparison.OrdinalIgnoreCase))
         {
-            var parent = Directory.GetParent(trimmed);
+            var parent = Directory.GetParent(baseDir);
             if (parent is not null) return parent.FullName;
         }
 
-        const string standardRoot = @"D:\AITeam";
-        return Directory.Exists(standardRoot) ? standardRoot : baseDir;
+        if (directoryExists(Path.Combine(baseDir, "data"))) return baseDir;
+        if (directoryExists(LegacyRoot)) return LegacyRoot;
+        return baseDir;
     }
 }
 
@@ -91,8 +112,14 @@ public sealed class ProjectRegistryService
         if (!File.Exists(path)) return new ProjectRegistryDocument();
 
         var json = File.ReadAllText(path, Encoding.UTF8);
-        return JsonSerializer.Deserialize<ProjectRegistryDocument>(json, JsonOptions)
-               ?? new ProjectRegistryDocument();
+        var document = JsonSerializer.Deserialize<ProjectRegistryDocument>(json, JsonOptions)
+                       ?? new ProjectRegistryDocument();
+        foreach (var project in document.Projects)
+        {
+            project.RepoPath = ToAbsolute(_runtimeRoot, project.RepoPath, Directory.Exists);
+            project.ProjectPath = ToAbsolute(_runtimeRoot, project.ProjectPath, Directory.Exists);
+        }
+        return document;
     }
 
     public void Save(ProjectRegistryDocument document)
@@ -100,8 +127,48 @@ public sealed class ProjectRegistryService
         var path = ResolveRegistryPath();
         RegistryPath = path;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var json = JsonSerializer.Serialize(document, JsonOptions) + Environment.NewLine;
+
+        // 存檔時把家裡的路徑改寫成相對位置，整個資料夾搬家、換磁碟代號都不會對不上。
+        // 先複製一份再改，呼叫端手上的物件維持完整路徑。
+        var copy = JsonSerializer.Deserialize<ProjectRegistryDocument>(
+            JsonSerializer.Serialize(document, JsonOptions), JsonOptions) ?? new ProjectRegistryDocument();
+        foreach (var project in copy.Projects)
+        {
+            project.RepoPath = ToRelative(_runtimeRoot, project.RepoPath);
+            project.ProjectPath = ToRelative(_runtimeRoot, project.ProjectPath);
+        }
+
+        var json = JsonSerializer.Serialize(copy, JsonOptions) + Environment.NewLine;
         File.WriteAllText(path, json, new UTF8Encoding(false));
+    }
+
+    /// <summary>家裡面的路徑存成相對位置；家外面的（使用者自己放在別處的 Repo）維持原樣。</summary>
+    internal static string ToRelative(string root, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path)) return path ?? "";
+        var home = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                   + Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(path);
+        return full.StartsWith(home, StringComparison.OrdinalIgnoreCase) ? full[home.Length..] : path;
+    }
+
+    /// <summary>
+    /// 讀檔時還原成完整路徑。舊版存的是完整路徑：如果那個位置已經不在了（資料夾搬過家），
+    /// 但在現在的家裡找得到同一個 repos\… 位置，就改用現在的。
+    /// </summary>
+    internal static string ToAbsolute(string root, string path, Func<string, bool> directoryExists)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return path ?? "";
+        if (!Path.IsPathRooted(path)) return Path.GetFullPath(Path.Combine(root, path));
+        if (directoryExists(path)) return path;
+
+        var normalized = path.Replace('/', '\\');
+        var at = normalized.IndexOf("\\repos\\", StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return path;
+
+        var relative = normalized[(at + 1)..].Replace('\\', Path.DirectorySeparatorChar);
+        var candidate = Path.GetFullPath(Path.Combine(root, relative));
+        return directoryExists(candidate) ? candidate : path;
     }
 
     public void Add(ProjectEntry entry)

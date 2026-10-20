@@ -12,6 +12,8 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
 
         var runtimeRoot = RuntimeRootResolver.Resolve();
+        // 先把 data 建起來：下次啟動時，這個資料夾就會被認成 AITeam 的家（可攜）。
+        try { Directory.CreateDirectory(Path.Combine(runtimeRoot, "data")); } catch { }
         CrashLogger.Initialize(runtimeRoot);
 
         Application.ThreadException += (_, e) =>
