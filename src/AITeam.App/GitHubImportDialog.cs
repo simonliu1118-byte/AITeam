@@ -26,6 +26,7 @@ public sealed class GitHubImportDialog : Form
     private readonly Label _status = new();
     private readonly Button _selectAllButton = new();
     private readonly Button _nextButton = new();
+    private readonly Button _loginButton = new();
 
     private bool _choosingProjects;
     private bool _busy;
@@ -112,6 +113,13 @@ public sealed class GitHubImportDialog : Form
         _selectAllButton.Click += (_, _) => ToggleAll();
         footer.Controls.Add(_selectAllButton, 0, 0);
 
+        StyleSecondary(_loginButton, "登入 GitHub", 120);
+        _loginButton.ForeColor = Accent;
+        _loginButton.Anchor = AnchorStyles.Left;
+        _loginButton.Visible = false;
+        _loginButton.Click += async (_, _) => await LoginToGitHubAsync();
+        footer.Controls.Add(_loginButton, 1, 0);
+
         var cancel = new Button();
         StyleSecondary(cancel, "取消", 90);
         cancel.Click += (_, _) => Close();
@@ -173,10 +181,27 @@ public sealed class GitHubImportDialog : Form
         catch (Exception ex)
         {
             SetStatus(ex.Message, isError: true);
+            _loginButton.Visible = ex is GitHubLoginRequiredException;
         }
         finally
         {
             SetBusy(false, null);
+        }
+    }
+
+    private async Task LoginToGitHubAsync()
+    {
+        var (command, arguments, title) = CliMaintenance.GitHubLogin;
+        _loginButton.Enabled = false;
+        try
+        {
+            if (!await CliConsole.RunAsync(this, command, arguments, title)) return;
+            _loginButton.Visible = false;
+            await LoadRepositoriesAsync();
+        }
+        finally
+        {
+            _loginButton.Enabled = true;
         }
     }
 

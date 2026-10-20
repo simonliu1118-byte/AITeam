@@ -1417,9 +1417,10 @@ public sealed class ChangeTaskService
             {
                 "--sandbox", allowWrite ? "workspace-write" : "read-only",
                 "--ask-for-approval", "never",
-                "-c", "model_reasoning_effort=\"high\"",
-                "exec", "--skip-git-repo-check", "--output-last-message", lastMessage, "-"
+                "-c", "model_reasoning_effort=\"high\""
             };
+            args.AddRange(CodexModels.Args(_runtimeRoot));
+            args.AddRange(new[] { "exec", "--skip-git-repo-check", "--output-last-message", lastMessage, "-" });
             var result = await _runner.RunAsync(
                 _agents.CodexCommand, args, workingDirectory, prompt, TimeSpan.FromMinutes(15), cancellationToken,
                 ActivitySink(ProviderId.Codex));

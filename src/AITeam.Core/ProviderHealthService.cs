@@ -25,26 +25,57 @@ public sealed class ProviderHealthService
             _ => throw new ArgumentOutOfRangeException(nameof(provider))
         };
 
+    private const string CodexHealthPrompt = "Return exactly AITEAM_HEALTH_OK. Do not inspect files and do not use tools.";
+
     private async Task<ProviderHealth> ProbeCodexAsync(CancellationToken cancellationToken)
     {
-        const string prompt = "Return exactly AITEAM_HEALTH_OK. Do not inspect files and do not use tools.";
+        var preferences = new AppPreferencesService(_runtimeRoot);
+        var remembered = preferences.Load().CodexModel;
+        var health = await ProbeCodexWithModelAsync(remembered, cancellationToken);
+        if (health.State != ProviderHealthState.Error || !CodexModels.LooksLikeUnsupportedModel(health.Detail ?? ""))
+            return health;
 
-        var args = new[]
+        // 模型不能用（帳號方案不支援、或模型已經下架）：從 Codex 內建的模型清單依序試，
+        // 找到能用的就記下來，之後每次叫 Codex 都指定它。使用者不用自己去 /model 選。
+        var rejected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (remembered is not null) rejected.Add(remembered);
+        if (CodexModels.RejectedModel(health.Detail ?? "") is { } named) rejected.Add(named);
+
+        var candidates = await ListCodexModelsAsync(cancellationToken);
+        foreach (var model in candidates.Where(m => !rejected.Contains(m)).Take(5))
+        {
+            var attempt = await ProbeCodexWithModelAsync(model, cancellationToken);
+            if (attempt.State == ProviderHealthState.Online)
+            {
+                try { preferences.Save(preferences.Load() with { CodexModel = model }); } catch { }
+                return attempt with { Detail = $"原本的模型不能用（{health.Detail}），已自動改用 {model}，之後都用這個模型。" };
+            }
+            // 額度用完、需要登入這類跟模型無關的問題，換模型也沒用，直接回報。
+            if (attempt.State != ProviderHealthState.Error || !CodexModels.LooksLikeUnsupportedModel(attempt.Detail ?? ""))
+                return attempt;
+        }
+
+        return health with { Detail = $"{health.Detail}（自動換模型也沒有找到能用的，請按「更新」把 Codex 更新到最新版）" };
+    }
+
+    private async Task<ProviderHealth> ProbeCodexWithModelAsync(string? model, CancellationToken cancellationToken)
+    {
+        var args = new List<string>
         {
             "--sandbox", "read-only",
             "--ask-for-approval", "never",
-            "-c", "model_reasoning_effort=\"low\"",
-            "exec",
-            "--skip-git-repo-check",
-            "--json",
-            "-"
+            "-c", "model_reasoning_effort=\"low\""
         };
+        args.AddRange(CodexModels.ArgsForModel(model));
+        args.AddRange(new[] { "exec", "--skip-git-repo-check", "--json", "-" });
+
+        var fallback = new List<string>(CodexModels.ArgsForModel(model)) { "exec", "--skip-git-repo-check", "--json", "-" };
 
         return await RunAndClassifyAsync(
             ProviderId.Codex,
             _agents.CodexCommand,
             args,
-            prompt,
+            CodexHealthPrompt,
             TimeSpan.FromSeconds(60),
             result =>
             {
@@ -62,7 +93,21 @@ public sealed class ProviderHealthService
                     || result.StandardOutput.Contains("AITEAM_HEALTH_OK", StringComparison.OrdinalIgnoreCase);
             },
             cancellationToken,
-            fallbackArguments: new[] { "exec", "--skip-git-repo-check", "--json", "-" });
+            fallbackArguments: fallback);
+    }
+
+    private async Task<IReadOnlyList<string>> ListCodexModelsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _runner.RunAsync(
+                _agents.CodexCommand, new[] { "debug", "models" }, _runtimeRoot, null, TimeSpan.FromSeconds(60), cancellationToken);
+            return result.ExitCode == 0 ? CodexModels.ParseCatalog(result.StandardOutput) : Array.Empty<string>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Array.Empty<string>();
+        }
     }
 
     private async Task<ProviderHealth> ProbeClaudeAsync(CancellationToken cancellationToken)
