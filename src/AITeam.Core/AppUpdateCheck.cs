@@ -20,8 +20,14 @@ public static class AppUpdateCheck
     public static string ReleasesUrl => $"https://api.github.com/repos/{Repository}/releases?per_page=50";
     public static string ReleasesPage => $"https://github.com/{Repository}/releases";
 
-    /// <summary>Release 的 zip 檔名與裡面那一層資料夾名稱，跟 release-windows.yml 打包的方式一致。</summary>
-    public static string PackageName(Version version) => $"AITeam-{version.ToString(3)}-win-x64";
+    /// <summary>
+    /// Release zip 裡面那一層資料夾的名稱，跟 release-windows.yml 打包的方式一致。
+    /// 固定叫 AITeam：解壓縮出來就是 AITeam 這個家，不帶版號。
+    /// </summary>
+    public const string PackageFolder = "AITeam";
+
+    /// <summary>Release 的 zip 檔名，版號用使用者看到的格式（VX.Y.Z）。</summary>
+    public static string ZipName(Version version) => $"AITeam-V{version.ToString(3)}.zip";
 
     /// <summary>
     /// 比 <paramref name="current"/> 新的版本裡最新的那個；沒有就回 null。
@@ -43,8 +49,7 @@ public static class AppUpdateCheck
             var version = new Version(int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value), int.Parse(match.Groups[3].Value));
             if (version <= current || (best is not null && version <= best.Version)) continue;
 
-            var package = PackageName(version);
-            var zipName = package + ".zip";
+            var zipName = ZipName(version);
             string zipUrl = "", checksumUrl = "";
             if (release.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
             {
@@ -58,7 +63,7 @@ public static class AppUpdateCheck
             }
 
             if (!IsReleaseDownload(zipUrl, tag) || !IsReleaseDownload(checksumUrl, tag)) continue;
-            best = new ReleaseOffer(version, tag, zipName, package, zipUrl, checksumUrl);
+            best = new ReleaseOffer(version, tag, zipName, PackageFolder, zipUrl, checksumUrl);
         }
 
         return best;
