@@ -121,7 +121,7 @@ jobs:
 
           Engineering / verification build.
           直接雙擊 AITeam.exe 即可執行，不需要另外安裝 .NET。
-          測試包會沿用 D:\AITeam 的既有專案與設定資料。
+          放在已經有 data 資料夾的地方（例如 D:\AITeam），就會沿用那裡的專案與設定。
           GitHub workflow run: $env:GITHUB_RUN_NUMBER
           Commit: $env:GITHUB_SHA
           "@
