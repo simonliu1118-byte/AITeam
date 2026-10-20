@@ -1,3 +1,5 @@
+using AITeam.Models;
+
 namespace AITeam.Services;
 
 /// <summary>
@@ -114,13 +116,53 @@ public enum MergeDecision
 /// </summary>
 public sealed record StartingVersionPrompt(string ProjectName, bool IsNewProject);
 
+/// <summary>實作的 AI（目前只處理 GPT / Codex）額度用完時，使用者的選擇。</summary>
+public enum ExhaustedChoice
+{
+    /// <summary>停下來，工作區保留。</summary>
+    Stop,
+
+    /// <summary>換下一家 AI 接手。</summary>
+    Fallback,
+
+    /// <summary>改由 ChatGPT 聊天人工接續：AITeam 開工作單，使用者轉交，做完回來按「已完成」。</summary>
+    ChatHandoff
+}
+
+/// <param name="Fallback">可以接手的下一家；null 代表沒有別家可用，只能人工接續或停止。</param>
+public sealed record ImplementerExhaustedPrompt(
+    ProviderId Exhausted,
+    ProviderId? Fallback,
+    string Step,
+    string Detail);
+
+public enum ChatHandoffAnswer
+{
+    /// <summary>使用者說 ChatGPT 做完了，AITeam 去 GitHub 拉回來檢查。</summary>
+    Done,
+
+    /// <summary>不做了，任務停止（分支留在 GitHub 上）。</summary>
+    Cancel
+}
+
+/// <param name="Warning">上一次按「已完成」但檢查沒過的原因；第一次顯示時是 null。</param>
+public sealed record ChatHandoffPrompt(
+    ChatHandoffStep Step,
+    int Round,
+    string HandoffText,
+    string WorkOrderUrl,
+    string? Warning);
+
 public sealed record TaskInteraction(
     TaskNoteBoard Notes,
     bool PauseAfterImplement,
     Func<CheckpointPrompt, CancellationToken, Task<CheckpointResponse>> AskCheckpoint,
     Func<MergeApprovalPrompt, CancellationToken, Task<MergeDecision>> AskMergeApproval,
     // 回傳 null 代表使用者不想現在決定，任務就此停下。沒有提供這個問法時維持舊行為：直接擋下。
-    Func<StartingVersionPrompt, CancellationToken, Task<string?>>? AskStartingVersion = null)
+    Func<StartingVersionPrompt, CancellationToken, Task<string?>>? AskStartingVersion = null,
+    // 下面兩個沒有提供時維持舊行為：GPT / Codex 額度用完就整個任務失敗。
+    Func<ImplementerExhaustedPrompt, CancellationToken, Task<ExhaustedChoice>>? AskImplementerExhausted = null,
+    Func<ChatHandoffPrompt, CancellationToken, Task<ChatHandoffAnswer>>? AskChatHandoff = null)
 {
     public static TaskInteraction None { get; } = new(
         new TaskNoteBoard(),

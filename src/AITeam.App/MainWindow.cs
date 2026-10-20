@@ -834,7 +834,8 @@ public sealed class MainWindow : Form
         _taskCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         _notes = new TaskNoteBoard();
         var interaction = new TaskInteraction(
-            _notes, _pauseAfterImplement.Checked, AskCheckpointAsync, AskMergeApprovalAsync, AskStartingVersionAsync);
+            _notes, _pauseAfterImplement.Checked, AskCheckpointAsync, AskMergeApprovalAsync, AskStartingVersionAsync,
+            AskImplementerExhaustedAsync, AskChatHandoffAsync);
 
         try
         {
@@ -1200,6 +1201,39 @@ public sealed class MainWindow : Form
     {
         using var dialog = new StartingVersionDialog(prompt);
         return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Version : null;
+    }
+
+    /// <summary>GPT / Codex 在實作途中額度用完：改用備援、改由 ChatGPT 人工接續，還是停止。</summary>
+    private Task<ExhaustedChoice> AskImplementerExhaustedAsync(ImplementerExhaustedPrompt prompt, CancellationToken cancellationToken)
+    {
+        var choice = InvokeRequired
+            ? (ExhaustedChoice)Invoke(new Func<ExhaustedChoice>(() => ShowImplementerExhaustedDialog(prompt)))
+            : ShowImplementerExhaustedDialog(prompt);
+        return Task.FromResult(choice);
+    }
+
+    private ExhaustedChoice ShowImplementerExhaustedDialog(ImplementerExhaustedPrompt prompt)
+    {
+        if (Form.ActiveForm is null) FlashTaskbar();
+        using var dialog = new ImplementerExhaustedDialog(prompt);
+        // 直接關掉視窗等於沒有選，當成停止：不要在使用者沒同意的情況下動用更貴的額度。
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.Choice : ExhaustedChoice.Stop;
+    }
+
+    /// <summary>交給 ChatGPT 的等待視窗。關掉視窗會先確認，不會悄悄停掉任務。</summary>
+    private Task<ChatHandoffAnswer> AskChatHandoffAsync(ChatHandoffPrompt prompt, CancellationToken cancellationToken)
+    {
+        var answer = InvokeRequired
+            ? (ChatHandoffAnswer)Invoke(new Func<ChatHandoffAnswer>(() => ShowChatHandoffDialog(prompt)))
+            : ShowChatHandoffDialog(prompt);
+        return Task.FromResult(answer);
+    }
+
+    private ChatHandoffAnswer ShowChatHandoffDialog(ChatHandoffPrompt prompt)
+    {
+        using var dialog = new ChatHandoffDialog(prompt);
+        dialog.ShowDialog(this);
+        return dialog.Answer;
     }
 
     /// <summary>高風險變更的人工合併關卡，現在在 AITeam 裡完成，不必再開瀏覽器。</summary>
