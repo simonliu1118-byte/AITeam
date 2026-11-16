@@ -68,7 +68,7 @@ The current app SVGs preserve the silhouettes from the user-approved visual sour
 
 `AutoQ` (CYERPAutoQuery, user-approved 2026-10-16) reuses the `Auto` lettering, frame and accent of CYERPAutoInput and replaces the lower motif with a large `Q`, so the two ERP automation tools read as one pair; they are planned to merge into one program later.
 
-`PRC` (CYPriceDesk, user-approved candidate C 2026-11-16) uses indigo, the one family accent not close to an existing member; the user chose it because the icon accent is also the app's base UI color. CYPriceDesk is a Cloudflare web app: it uses the SVG and PNG layers as favicon/app icons; the ICO is produced for family consistency only.
+`PRC` (CYPriceDesk, user-approved candidate C 2026-11-16) uses indigo, a hue no existing member uses; the user chose it over magenta because the icon accent is also the app's base UI color. CYPriceDesk is a Cloudflare web app: it uses the SVG and PNG layers as favicon/app icons; the ICO is produced for family consistency only.
 
 The two horizontal lines are an INV-specific motif, not a universal family mark.
 
