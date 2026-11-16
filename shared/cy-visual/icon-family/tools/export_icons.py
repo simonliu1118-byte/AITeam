@@ -19,7 +19,7 @@ SOURCES = {
     "WM": ("CYWatermark", "watermark", "#019EB9"),
     "CVT": ("CYConverter", "converter", "#F09D03"),
     "CAL": ("CYTriplicateCalculator", "tri-invoice-calc", "#FD4944"),
-    "PRC": ("CYPriceDesk", "price-desk", "#3B4CCA"),
+    "PRC": ("CYPriceDesk", "price-desk", "#0F5E73"),
 }
 
 

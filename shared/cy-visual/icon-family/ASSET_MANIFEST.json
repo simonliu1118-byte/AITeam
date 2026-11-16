@@ -954,17 +954,17 @@
     "PRC": {
       "app": "CYPriceDesk",
       "folder": "price-desk",
-      "accent": "#3B4CCA",
+      "accent": "#0F5E73",
       "svg": {
-        "bytes": 3862,
-        "sha256": "a7d78c14fbd1e6d330a98b5a0ff727b93b99ffe282d4255df2dc7d25bfaaef93",
-        "git_blob_sha1": "c85a8126eee27dc309717bed340f557b2b5c3fcd"
+        "bytes": 3900,
+        "sha256": "e93f1faae03ffb15f8812d297ed20c4e2019cbb5f89a6f249439105aec797160",
+        "git_blob_sha1": "9159fb23893481c61b51f6503789ed23ee80b6cc"
       },
       "png": {
         "16": {
-          "bytes": 647,
-          "sha256": "ded390cc7a037fcfdc05a5cc66aad490bcbb3091d21f4eb85d111b26bb323876",
-          "git_blob_sha1": "72eab249d73a35abaedc61f13d6e513a6c14c351",
+          "bytes": 655,
+          "sha256": "3c2095e77e75b2ee055e0d10936ad71a42383a0b76c6ac82184755c6ebd016db",
+          "git_blob_sha1": "256634e601359194dbd3b62bdb1c4a2598cee248",
           "dimensions": [
             16,
             16
@@ -972,9 +972,9 @@
           "mode": "RGBA"
         },
         "24": {
-          "bytes": 1183,
-          "sha256": "740bbdd4494116417d470fced058bd24faefff498edf2579c07b3c79537467bf",
-          "git_blob_sha1": "773f09ce96670ad20433c76a33d528c53e921717",
+          "bytes": 1207,
+          "sha256": "fcb298434e3d95847c15b7a379e8a0a0c9787b94d2b0fe4bdfffe014ad1be5b9",
+          "git_blob_sha1": "0ef58427c48b4bab93a2d436831f5a533ead1816",
           "dimensions": [
             24,
             24
@@ -982,9 +982,9 @@
           "mode": "RGBA"
         },
         "32": {
-          "bytes": 1601,
-          "sha256": "9463c7a245c1c158008ee4c1b5214f4efa486e5d9a24d32fd59a398c707246fc",
-          "git_blob_sha1": "d2efc0f3e23fc3785052d992dd006bcc2c2bf809",
+          "bytes": 1607,
+          "sha256": "fbacf4fd36987a87abeb2cbff8cc5db89615ee8aeb8b4f94c5c2a7f31f91eaf9",
+          "git_blob_sha1": "fa8d415e704da7148cab828aabe4c5f502768574",
           "dimensions": [
             32,
             32
@@ -992,9 +992,9 @@
           "mode": "RGBA"
         },
         "48": {
-          "bytes": 2550,
-          "sha256": "1a4af4b2148bcefa570e04d7499e80cbc59449ce465b4cb3f6652fbd5d085506",
-          "git_blob_sha1": "43009df68b67cf4c26ff814a8284124773c95ab7",
+          "bytes": 2528,
+          "sha256": "48c29a7200f1070c27a9dd1cd73a76e5cf0e382362f0f9356f91cb6c68064cc4",
+          "git_blob_sha1": "bd69bb83d1bbd81055cea301ae6db787fe3dc975",
           "dimensions": [
             48,
             48
@@ -1002,9 +1002,9 @@
           "mode": "RGBA"
         },
         "64": {
-          "bytes": 3498,
-          "sha256": "5c332ba437903bf4645ab54f3e90b110e0a292fa751f0665c512e58e1fa45937",
-          "git_blob_sha1": "e5b2549ba95187cebeb757493cff05164de5a7c5",
+          "bytes": 3513,
+          "sha256": "81fea135df17bc40f0a8f5a20e5e77efb4aaa70164124852fb75a0a3447f32b0",
+          "git_blob_sha1": "a09da16b2f01e14c62e3bb8483e5441ec4eb8b77",
           "dimensions": [
             64,
             64
@@ -1012,9 +1012,9 @@
           "mode": "RGBA"
         },
         "128": {
-          "bytes": 7337,
-          "sha256": "41b23c3d559bcc04030472415da9bbf2278104ce54308b6de636764c4d3b2ee5",
-          "git_blob_sha1": "4939ff8c80e3e9bdac6e75b5c5acec76fc4ab988",
+          "bytes": 7364,
+          "sha256": "750acd07e206460e803085abddd80b957278045a39b3b14e91645167f0751e70",
+          "git_blob_sha1": "1cf5837a1c61ba2d151f96fc90b2c2e31f3d962e",
           "dimensions": [
             128,
             128
@@ -1022,9 +1022,9 @@
           "mode": "RGBA"
         },
         "256": {
-          "bytes": 15423,
-          "sha256": "8d19f638455e9600d755b3c140c91741c80c46680e986f12e3bc4aa986b13cf9",
-          "git_blob_sha1": "122fba61cec39654b2a644840064ea3164a7e871",
+          "bytes": 15331,
+          "sha256": "6f670364a38e0226d6b2d0175f33eb4b2930a494d1f56ae68d65acb4449873d8",
+          "git_blob_sha1": "b3130c55509d51fcbc19415c47b4c553902f7b5e",
           "dimensions": [
             256,
             256
@@ -1033,9 +1033,9 @@
         }
       },
       "ico": {
-        "bytes": 32357,
-        "sha256": "dbe7c5201ed6e23505fd4629f7c5d59cb4d1b292c6c3f0e98ec81266794fb558",
-        "git_blob_sha1": "d1bb8e1ca633fa34ce1be0a1d0043bbb71d3648b",
+        "bytes": 32323,
+        "sha256": "2b0507bd0ff40b40c11882efa2e9fae36dcbf934bb5fc5f7aa42e19efdf578e4",
+        "git_blob_sha1": "fac7711ca3245d2fac9d235cf91323cacccb1991",
         "entries": [
           [
             16,
