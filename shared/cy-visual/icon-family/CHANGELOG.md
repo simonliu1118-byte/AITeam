@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `PRC` for CYPriceDesk (user-approved candidate C, 2026-11-16): petrol-blue `#0F5E73` accent (indigo `#3B4CCA` was replaced before merge so the independent site does not read as CY Web blue), outlined `PRC` identifier (Inter Black), price tag with `$` plus magnifier as the lower motif. First web member of the family; exported with `tools/export_icons.py` and every existing app's PNG/ICO bytes were reproduced unchanged.
 - Added `AutoQ` for CYERPAutoQuery (user-approved 2026-10-16): CYERPAutoInput's `Auto` lettering, frame and `#FE6A02` accent with a large `Q` as the lower motif. Exported with the existing `tools/export_icons.py`; every existing app's PNG/ICO bytes were reproduced unchanged.
 - Consolidated family documentation into `README.md`, `ICON_FAMILY.md`, and `CHANGELOG.md`.
 - Removed the standalone creation brief and standalone version file.

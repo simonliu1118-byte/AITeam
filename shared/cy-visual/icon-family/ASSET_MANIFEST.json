@@ -950,6 +950,123 @@
           ]
         ]
       }
+    },
+    "PRC": {
+      "app": "CYPriceDesk",
+      "folder": "price-desk",
+      "accent": "#0F5E73",
+      "svg": {
+        "bytes": 3900,
+        "sha256": "e93f1faae03ffb15f8812d297ed20c4e2019cbb5f89a6f249439105aec797160",
+        "git_blob_sha1": "9159fb23893481c61b51f6503789ed23ee80b6cc"
+      },
+      "png": {
+        "16": {
+          "bytes": 655,
+          "sha256": "3c2095e77e75b2ee055e0d10936ad71a42383a0b76c6ac82184755c6ebd016db",
+          "git_blob_sha1": "256634e601359194dbd3b62bdb1c4a2598cee248",
+          "dimensions": [
+            16,
+            16
+          ],
+          "mode": "RGBA"
+        },
+        "24": {
+          "bytes": 1207,
+          "sha256": "fcb298434e3d95847c15b7a379e8a0a0c9787b94d2b0fe4bdfffe014ad1be5b9",
+          "git_blob_sha1": "0ef58427c48b4bab93a2d436831f5a533ead1816",
+          "dimensions": [
+            24,
+            24
+          ],
+          "mode": "RGBA"
+        },
+        "32": {
+          "bytes": 1607,
+          "sha256": "fbacf4fd36987a87abeb2cbff8cc5db89615ee8aeb8b4f94c5c2a7f31f91eaf9",
+          "git_blob_sha1": "fa8d415e704da7148cab828aabe4c5f502768574",
+          "dimensions": [
+            32,
+            32
+          ],
+          "mode": "RGBA"
+        },
+        "48": {
+          "bytes": 2528,
+          "sha256": "48c29a7200f1070c27a9dd1cd73a76e5cf0e382362f0f9356f91cb6c68064cc4",
+          "git_blob_sha1": "bd69bb83d1bbd81055cea301ae6db787fe3dc975",
+          "dimensions": [
+            48,
+            48
+          ],
+          "mode": "RGBA"
+        },
+        "64": {
+          "bytes": 3513,
+          "sha256": "81fea135df17bc40f0a8f5a20e5e77efb4aaa70164124852fb75a0a3447f32b0",
+          "git_blob_sha1": "a09da16b2f01e14c62e3bb8483e5441ec4eb8b77",
+          "dimensions": [
+            64,
+            64
+          ],
+          "mode": "RGBA"
+        },
+        "128": {
+          "bytes": 7364,
+          "sha256": "750acd07e206460e803085abddd80b957278045a39b3b14e91645167f0751e70",
+          "git_blob_sha1": "1cf5837a1c61ba2d151f96fc90b2c2e31f3d962e",
+          "dimensions": [
+            128,
+            128
+          ],
+          "mode": "RGBA"
+        },
+        "256": {
+          "bytes": 15331,
+          "sha256": "6f670364a38e0226d6b2d0175f33eb4b2930a494d1f56ae68d65acb4449873d8",
+          "git_blob_sha1": "b3130c55509d51fcbc19415c47b4c553902f7b5e",
+          "dimensions": [
+            256,
+            256
+          ],
+          "mode": "RGBA"
+        }
+      },
+      "ico": {
+        "bytes": 32323,
+        "sha256": "2b0507bd0ff40b40c11882efa2e9fae36dcbf934bb5fc5f7aa42e19efdf578e4",
+        "git_blob_sha1": "fac7711ca3245d2fac9d235cf91323cacccb1991",
+        "entries": [
+          [
+            16,
+            16
+          ],
+          [
+            24,
+            24
+          ],
+          [
+            32,
+            32
+          ],
+          [
+            48,
+            48
+          ],
+          [
+            64,
+            64
+          ],
+          [
+            128,
+            128
+          ],
+          [
+            256,
+            256
+          ]
+        ]
+      }
     }
   }
 }
