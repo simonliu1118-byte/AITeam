@@ -60,12 +60,15 @@ The current app SVGs preserve the silhouettes from the user-approved visual sour
 | CYWatermark | CYWatermark | `WM` | `#019EB9` | marked document / water drop |
 | SMARTCOPIConverter | CYConverter | `CVT` | `#F09D03` | document conversion |
 | TriINVCalc | CYTriplicateCalculator | `CAL` | `#FD4944` | calculator |
+| CYPriceDesk | CYPriceDesk | `PRC` | `#3B4CCA` | price tag + magnifier |
 
 `WM` supersedes the earlier `WTM` identifier by explicit user decision.
 
 `Auto` remains the approved readability exception to the short-uppercase default.
 
 `AutoQ` (CYERPAutoQuery, user-approved 2026-10-16) reuses the `Auto` lettering, frame and accent of CYERPAutoInput and replaces the lower motif with a large `Q`, so the two ERP automation tools read as one pair; they are planned to merge into one program later.
+
+`PRC` (CYPriceDesk, user-approved candidate C 2026-11-16) uses indigo, the one family accent not close to an existing member; the user chose it because the icon accent is also the app's base UI color. CYPriceDesk is a Cloudflare web app: it uses the SVG and PNG layers as favicon/app icons; the ICO is produced for family consistency only.
 
 The two horizontal lines are an INV-specific motif, not a universal family mark.
 
@@ -81,6 +84,7 @@ Canonical per-app vector sources:
 - `apps/watermark/WM.svg`
 - `apps/converter/CVT.svg`
 - `apps/tri-invoice-calc/CAL.svg`
+- `apps/price-desk/PRC.svg`
 
 Each app directory also contains:
 
@@ -150,6 +154,7 @@ Included:
 - CYERPAutoQuery
 - SMARTCOPIConverter
 - TriINVCalc
+- CYPriceDesk (web; user-approved 2026-11-16)
 
 ### CYapps_pvt
 
